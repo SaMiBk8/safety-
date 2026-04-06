@@ -1,0 +1,5 @@
+{
+  "name": "SafeChild",
+  "description": "A professional child safety and educational coordination platform with real-time tracking and SOS features.",
+  "requestFramePermissions": ["camera", "microphone", "geolocation"]
+}

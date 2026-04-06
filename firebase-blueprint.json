@@ -1,0 +1,181 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Base user profile for all roles (Admin, SchoolAdmin, Teacher, Parent, Child)",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string", "enum": ["system_admin", "school_admin", "teacher", "parent", "child"] },
+        "schoolId": { "type": "string", "description": "Reference to School entity (if applicable)" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["active", "blocked"] },
+        "parentId": { "type": "string", "description": "UID of the parent (for children)" },
+        "childIds": { "type": "array", "items": { "type": "string" }, "description": "List of child UIDs (for parents)" }
+      },
+      "required": ["uid", "email", "role", "status"]
+    },
+    "School": {
+      "title": "School",
+      "description": "Educational institution details",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "address": { "type": "string" },
+        "adminId": { "type": "string", "description": "UID of the SchoolAdmin" }
+      },
+      "required": ["id", "name", "adminId"]
+    },
+    "Student": {
+      "title": "Student",
+      "description": "Student profile linked to a child user and parent",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "childUid": { "type": "string" },
+        "parentUid": { "type": "string" },
+        "schoolId": { "type": "string" },
+        "teacherId": { "type": "string" },
+        "name": { "type": "string" },
+        "grade": { "type": "string" },
+        "location": { 
+          "type": "object",
+          "properties": {
+            "lat": { "type": "number" },
+            "lng": { "type": "number" },
+            "lastUpdated": { "type": "string", "format": "date-time" }
+          }
+        }
+      },
+      "required": ["id", "childUid", "parentUid", "schoolId"]
+    },
+    "Announcement": {
+      "title": "Announcement",
+      "description": "School-wide announcements",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "schoolId": { "type": "string" },
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "schoolId", "title", "content"]
+    },
+    "SOSAlert": {
+      "title": "SOS Alert",
+      "description": "Emergency alerts triggered by children",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "childUid": { "type": "string" },
+        "parentUid": { "type": "string" },
+        "location": {
+          "type": "object",
+          "properties": {
+            "lat": { "type": "number" },
+            "lng": { "type": "number" }
+          }
+        },
+        "status": { "type": "string", "enum": ["active", "resolved"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "childUid", "parentUid", "status", "createdAt"]
+    },
+    "Incident": {
+      "title": "Incident",
+      "description": "Behavioral or safety incidents reported by teachers",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "studentId": { "type": "string" },
+        "teacherId": { "type": "string" },
+        "content": { "type": "string" },
+        "type": { "type": "string", "enum": ["behavior", "safety", "other"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "studentId", "teacherId", "content", "type", "createdAt"]
+    },
+    "Attendance": {
+      "title": "Attendance",
+      "description": "Daily attendance records",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "studentId": { "type": "string" },
+        "teacherId": { "type": "string" },
+        "status": { "type": "string", "enum": ["present", "absent", "late"] },
+        "date": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "studentId", "teacherId", "status", "date"]
+    },
+    "Grade": {
+      "title": "Grade",
+      "description": "Academic grades for students",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "studentId": { "type": "string" },
+        "teacherId": { "type": "string" },
+        "grade": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "studentId", "teacherId", "grade", "createdAt"]
+    },
+    "HomeworkSubmission": {
+      "title": "Homework Submission",
+      "description": "Homework submitted by students",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "studentId": { "type": "string" },
+        "childUid": { "type": "string" },
+        "title": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "reviewed"] },
+        "submittedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "studentId", "childUid", "title", "status", "submittedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles"
+    },
+    "/schools/{schoolId}": {
+      "schema": "School",
+      "description": "School details"
+    },
+    "/students/{studentId}": {
+      "schema": "Student",
+      "description": "Student records and real-time tracking"
+    },
+    "/announcements/{announcementId}": {
+      "schema": "Announcement",
+      "description": "School announcements"
+    },
+    "/sos_alerts/{alertId}": {
+      "schema": "SOSAlert",
+      "description": "Active emergency alerts"
+    },
+    "/incidents/{incidentId}": {
+      "schema": "Incident",
+      "description": "Reported incidents"
+    },
+    "/attendance/{attendanceId}": {
+      "schema": "Attendance",
+      "description": "Attendance records"
+    },
+    "/grades/{gradeId}": {
+      "schema": "Grade",
+      "description": "Academic grades"
+    },
+    "/homework_submissions/{submissionId}": {
+      "schema": "HomeworkSubmission",
+      "description": "Homework submissions"
+    }
+  }
+}

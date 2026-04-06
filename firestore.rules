@@ -1,0 +1,389 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    // Collection: users
+    // Document ID: userId (Auth UID)
+    // Fields:
+    //   - uid: string (required)
+    //   - email: string (required, email format)
+    //   - displayName: string (optional)
+    //   - role: string (required, enum: system_admin, school_admin, teacher, parent, child, visitor)
+    //   - schoolId: string (optional)
+    //   - createdAt: timestamp (required)
+    //   - status: string (required, enum: active, blocked)
+    //   - requestedRole: string (optional)
+    //   - requestMessage: string (optional)
+    //   - updatedAt: timestamp (optional)
+    //
+    // Collection: visitor_messages
+    // Document ID: messageId
+    // Fields:
+    //   - uid: string (required)
+    //   - email: string (required)
+    //   - displayName: string (optional)
+    //   - requestedRole: string (required)
+    //   - message: string (required)
+    //   - createdAt: timestamp (required)
+    //   - status: string (required, enum: unread, read)
+    //
+    // Collection: schools
+    // Document ID: schoolId
+    // Fields:
+    //   - id: string (required)
+    //   - name: string (required)
+    //   - address: string (required)
+    //   - adminId: string (required, UID of the SchoolAdmin)
+    //
+    // Collection: students
+    // Document ID: studentId
+    // Fields:
+    //   - id: string (required)
+    //   - childUid: string (required)
+    //   - parentUid: string (required)
+    //   - schoolId: string (required)
+    //   - teacherId: string (optional)
+    //   - name: string (required)
+    //   - grade: string (required)
+    //   - location: map (optional)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && 
+        ((request.auth.token.email == "bsami04bsami@gmail.com" && request.auth.token.email_verified == true) ||
+         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'system_admin'));
+    }
+
+    function isSchoolAdmin(schoolId) {
+      return isAuthenticated() && 
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'school_admin' &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.schoolId == schoolId;
+    }
+
+    function isTeacher(schoolId) {
+      return isAuthenticated() && 
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'teacher' &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.schoolId == schoolId;
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidUrl(url) {
+      return url is string && (url.matches("^https://.*") || url.matches("^http://.*"));
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+    function isValidUser(data) {
+      return hasOnlyAllowedFields(['uid', 'email', 'displayName', 'role', 'status', 'requestedRole', 'requestMessage', 'updatedAt', 'isDarkMode', 'createdAt', 'schoolId', 'parentId', 'childIds']) &&
+             (data.uid is string) && 
+             (data.email is string) &&
+             (!('role' in data) || data.role in ['system_admin', 'school_admin', 'teacher', 'parent', 'child', 'visitor']) &&
+             (!('status' in data) || data.status in ['active', 'blocked']) &&
+             (!('createdAt' in data) || data.createdAt is timestamp) &&
+             (!('displayName' in data) || (data.displayName is string && data.displayName.size() < 100)) &&
+             (!('requestedRole' in data) || data.requestedRole in ['teacher', 'parent', 'child']) &&
+             (!('requestMessage' in data) || (data.requestMessage is string && data.requestMessage.size() < 1000)) &&
+             (!('isDarkMode' in data) || data.isDarkMode is bool) &&
+             (!('parentId' in data) || (data.parentId is string || data.parentId == null)) &&
+             (!('childIds' in data) || data.childIds is list) &&
+             (!('schoolId' in data) || (data.schoolId is string || data.schoolId == null)) &&
+             (!('updatedAt' in data) || data.updatedAt is timestamp);
+    }
+
+    function isValidSchool(data) {
+      return hasOnlyAllowedFields(['id', 'name', 'address', 'adminId']) &&
+             data.id is string &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.address is string && data.address.size() > 0 && data.address.size() < 200 &&
+             data.adminId is string;
+    }
+
+    function isValidStudent(data) {
+      return hasOnlyAllowedFields(['id', 'childUid', 'parentUid', 'schoolId', 'teacherId', 'name', 'grade', 'location']) &&
+             data.id is string &&
+             data.childUid is string &&
+             data.parentUid is string &&
+             data.schoolId is string &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.grade is string && data.grade.size() > 0 && data.grade.size() < 20 &&
+             (!('location' in data) || (data.location is map && data.location.lat is number && data.location.lng is number));
+    }
+
+    function isValidAnnouncement(data) {
+      return hasOnlyAllowedFields(['schoolId', 'title', 'content', 'createdAt', 'authorId']) &&
+             data.schoolId is string &&
+             data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
+             data.content is string && data.content.size() > 0 && data.content.size() < 5000 &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidSOSAlert(data) {
+      return hasOnlyAllowedFields(['childUid', 'parentUid', 'status', 'createdAt', 'location']) &&
+             data.childUid is string &&
+             data.parentUid is string &&
+             data.status in ['active', 'resolved'] &&
+             data.createdAt is timestamp &&
+             data.location is map && data.location.lat is number && data.location.lng is number;
+    }
+
+    function isValidIncident(data) {
+      return hasOnlyAllowedFields(['studentId', 'teacherId', 'content', 'type', 'createdAt']) &&
+             data.studentId is string &&
+             data.teacherId is string &&
+             data.content is string && data.content.size() > 0 && data.content.size() < 2000 &&
+             data.type in ['behavior', 'safety', 'other'] &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidAttendance(data) {
+      return hasOnlyAllowedFields(['studentId', 'teacherId', 'status', 'date']) &&
+             data.studentId is string &&
+             data.teacherId is string &&
+             data.status in ['present', 'absent', 'late'] &&
+             data.date is timestamp;
+    }
+
+    function isValidGrade(data) {
+      return hasOnlyAllowedFields(['studentId', 'teacherId', 'grade', 'createdAt']) &&
+             data.studentId is string &&
+             data.teacherId is string &&
+             data.grade is string && data.grade.size() > 0 && data.grade.size() < 20 &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidHomeworkSubmission(data) {
+      return hasOnlyAllowedFields(['studentId', 'schoolId', 'childUid', 'title', 'fileName', 'fileUrl', 'submittedAt', 'status']) &&
+             data.studentId is string &&
+             data.schoolId is string &&
+             data.childUid is string &&
+             data.title is string && data.title.size() > 0 && data.title.size() < 500 &&
+             (!('fileName' in data) || (data.fileName is string || data.fileName == null)) &&
+             (!('fileUrl' in data) || (data.fileUrl is string || data.fileUrl == null)) &&
+             data.submittedAt is timestamp &&
+             data.status in ['pending', 'reviewed'];
+    }
+
+    function isValidVisitorMessage(data) {
+      return hasOnlyAllowedFields(['uid', 'email', 'displayName', 'requestedRole', 'schoolId', 'message', 'createdAt', 'status', 'fileName', 'fileUrl']) &&
+             data.uid is string &&
+             data.email is string &&
+             (!('displayName' in data) || data.displayName is string) &&
+             data.requestedRole in ['teacher', 'parent', 'child'] &&
+             (data.schoolId == null || data.schoolId is string) &&
+             data.message is string && data.message.size() > 0 && data.message.size() < 2000 &&
+             data.createdAt is timestamp &&
+             data.status in ['unread', 'read'];
+    }
+
+    // ===============================================================
+    // Collection Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (
+        isOwner(userId) || 
+        isAdmin() || 
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'school_admin') ||
+        (resource != null && (
+          resource.data.role == 'system_admin' || 
+          resource.data.role == 'teacher' ||
+          (resource.data.role == 'parent' && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['teacher', 'school_admin', 'system_admin']) ||
+          (resource.data.role == 'child' && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (
+            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['teacher', 'school_admin', 'system_admin'] ||
+            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.uid == resource.data.parentId
+          ))
+        ))
+      );
+      allow create: if isAuthenticated() && isValidUser(request.resource.data) && 
+                    isOwner(userId) && 
+                    hasRequiredFields(['uid', 'email', 'status', 'createdAt']) &&
+                    (!('role' in request.resource.data) || 
+                     request.resource.data.role == 'visitor' ||
+                     (request.resource.data.role == 'system_admin' && request.auth.token.email == "bsami04bsami@gmail.com"));
+      allow update: if isAuthenticated() && (
+        isAdmin() || (
+          isOwner(userId) && 
+          isValidUser(request.resource.data) &&
+          (!('role' in request.resource.data) || request.resource.data.role == resource.data.role) &&
+          (!('uid' in request.resource.data) || request.resource.data.uid == resource.data.uid) &&
+          (!('email' in request.resource.data) || request.resource.data.email == resource.data.email) &&
+          (!('status' in request.resource.data) || request.resource.data.status == resource.data.status)
+        ) || (
+          // School Admin updating users in their school or claiming a visitor
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'school_admin' &&
+          (
+            resource.data.schoolId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.schoolId ||
+            (resource.data.schoolId == null && request.resource.data.schoolId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.schoolId)
+          ) &&
+          isValidUser(request.resource.data)
+        ) || (
+          // Parent linking a child
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'parent' &&
+          resource.data.role == 'child' &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['parentId']) &&
+          request.resource.data.parentId == request.auth.uid &&
+          isValidUser(request.resource.data)
+        )
+      );
+      allow delete: if isAdmin();
+    }
+
+    match /schools/{schoolId} {
+      allow read: if isAuthenticated();
+      allow create: if isAdmin() && isValidSchool(request.resource.data);
+      allow update: if (isAdmin() || isSchoolAdmin(schoolId)) && isValidSchool(request.resource.data);
+    }
+
+    match /students/{studentId} {
+      allow read: if isAuthenticated() && (
+        isAdmin() || 
+        request.auth.uid == resource.data.childUid || 
+        request.auth.uid == resource.data.parentUid ||
+        isTeacher(resource.data.schoolId) ||
+        isSchoolAdmin(resource.data.schoolId)
+      );
+      allow create: if (isAdmin() || isSchoolAdmin(request.resource.data.schoolId)) && isValidStudent(request.resource.data);
+      allow update: if isAuthenticated() && isValidStudent(request.resource.data) && (
+        isAdmin() || 
+        isSchoolAdmin(resource.data.schoolId) ||
+        (isTeacher(resource.data.schoolId) && 
+         request.resource.data.childUid == resource.data.childUid &&
+         request.resource.data.parentUid == resource.data.parentUid &&
+         request.resource.data.schoolId == resource.data.schoolId) ||
+        (request.auth.uid == resource.data.childUid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['location'])) ||
+        (
+          // Parent linking a child
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'parent' &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['parentUid']) &&
+          request.resource.data.parentUid == request.auth.uid
+        )
+      );
+    }
+
+    match /announcements/{announcementId} {
+      allow read: if isAuthenticated();
+      allow create: if (isAdmin() || isSchoolAdmin(request.resource.data.schoolId)) && isValidAnnouncement(request.resource.data);
+      allow update: if (isAdmin() || isSchoolAdmin(resource.data.schoolId)) && isValidAnnouncement(request.resource.data);
+      allow delete: if isAdmin() || isSchoolAdmin(resource.data.schoolId);
+    }
+
+    match /sos_alerts/{alertId} {
+      allow read: if isAuthenticated() && (
+        isAdmin() || 
+        request.auth.uid == resource.data.childUid || 
+        request.auth.uid == resource.data.parentUid
+      );
+      allow create: if isAuthenticated() && 
+                    isValidSOSAlert(request.resource.data) &&
+                    get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'child' &&
+                    request.resource.data.childUid == request.auth.uid &&
+                    exists(/databases/$(database)/documents/students/$(request.resource.data.childUid)) &&
+                    get(/databases/$(database)/documents/students/$(request.resource.data.childUid)).data.parentUid == request.resource.data.parentUid;
+      allow update: if isAuthenticated() && 
+                    isValidSOSAlert(request.resource.data) && (
+        isAdmin() || 
+        request.auth.uid == resource.data.parentUid
+      );
+    }
+
+    match /incidents/{incidentId} {
+      allow read: if isAuthenticated() && (
+        isAdmin() || 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'teacher' ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'school_admin'
+      );
+      allow create: if isAuthenticated() && 
+                    isValidIncident(request.resource.data) &&
+                    get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'teacher' &&
+                    request.resource.data.teacherId == request.auth.uid;
+    }
+
+    match /attendance/{attendanceId} {
+      allow read: if isAuthenticated() && (
+        isAdmin() || 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'teacher' ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'school_admin'
+      );
+      allow create: if isAuthenticated() && 
+                    isValidAttendance(request.resource.data) &&
+                    get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'teacher' &&
+                    request.resource.data.teacherId == request.auth.uid;
+    }
+
+    match /grades/{gradeId} {
+      allow read: if isAuthenticated() && (
+        isAdmin() || 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'teacher' ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'school_admin'
+      );
+      allow create: if isAuthenticated() && 
+                    isValidGrade(request.resource.data) &&
+                    get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'teacher' &&
+                    request.resource.data.teacherId == request.auth.uid;
+    }
+
+    match /homework_submissions/{submissionId} {
+      allow read: if isAuthenticated() && (
+        isAdmin() || 
+        request.auth.uid == resource.data.childUid ||
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'teacher' && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.schoolId == resource.data.schoolId) ||
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'school_admin' && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.schoolId == resource.data.schoolId)
+      );
+      allow create: if isAuthenticated() && 
+                    isValidHomeworkSubmission(request.resource.data) &&
+                    get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'child' &&
+                    request.resource.data.childUid == request.auth.uid;
+    }
+
+    match /visitor_messages/{messageId} {
+      allow read: if isAuthenticated() && (
+        isAdmin() || 
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'school_admin' && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.schoolId == resource.data.schoolId)
+      );
+      allow create: if isAuthenticated() && isValidVisitorMessage(request.resource.data) && request.resource.data.uid == request.auth.uid;
+      allow update: if isAuthenticated() && (
+        isAdmin() || 
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'school_admin' && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.schoolId == resource.data.schoolId)
+      ) && isValidVisitorMessage(request.resource.data);
+    }
+
+    match /messages/{messageId} {
+      allow read: if isAuthenticated() && (request.auth.uid in resource.data.participants || isAdmin());
+      allow create: if isAuthenticated() && request.auth.uid in request.resource.data.participants && request.resource.data.senderId == request.auth.uid;
+    }
+  }
+}
