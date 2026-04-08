@@ -1,4 +1,13 @@
-export type UserRole = 'system_admin' | 'school_admin' | 'teacher' | 'parent' | 'child' | 'visitor';
+export type UserRole = 
+  | 'system_admin' 
+  | 'school_admin' 
+  | 'teacher' 
+  | 'quran_teacher' 
+  | 'sports_coach' 
+  | 'parent' 
+  | 'child' 
+  | 'authorized_person' 
+  | 'visitor';
 
 export interface UserProfile {
   uid: string;
@@ -6,12 +15,16 @@ export interface UserProfile {
   displayName?: string;
   role?: UserRole;
   schoolId?: string;
-  status: 'active' | 'blocked';
+  status: 'active' | 'blocked' | 'pending';
   createdAt: any; // Firestore Timestamp
   requestedRole?: UserRole;
   requestMessage?: string;
   parentId?: string; // For children
   childIds?: string[]; // For parents
+  authorizedBy?: string; // For authorized persons (parent UID)
+  isDarkMode?: boolean;
+  updatedAt?: any;
+  photoUrl?: string;
 }
 
 export interface School {

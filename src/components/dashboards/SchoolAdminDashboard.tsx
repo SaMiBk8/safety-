@@ -24,9 +24,9 @@ interface VisitorMessage {
 
 export const SchoolAdminDashboard: React.FC = () => {
   const { user, profile } = useAuth();
-  const [activeTab, setActiveTab] = useState<'announcements' | 'teachers' | 'requests' | 'messenger'>('announcements');
+  const [activeTab, setActiveTab] = useState<'announcements' | 'staff' | 'requests' | 'messenger'>('announcements');
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
-  const [teachers, setTeachers] = useState<UserProfile[]>([]);
+  const [staff, setStaff] = useState<UserProfile[]>([]);
   const [parents, setParents] = useState<UserProfile[]>([]);
   const [requests, setRequests] = useState<VisitorMessage[]>([]);
   const [selectedContact, setSelectedContact] = useState<UserProfile | null>(null);
@@ -51,13 +51,13 @@ export const SchoolAdminDashboard: React.FC = () => {
       handleFirestoreError(error, OperationType.LIST, 'announcements', user || undefined);
     });
 
-    const teachersQ = query(
+    const staffQ = query(
       collection(db, 'users'),
       where('schoolId', '==', profile.schoolId),
-      where('role', '==', 'teacher')
+      where('role', 'in', ['teacher', 'quran_teacher', 'sports_coach'])
     );
-    const unsubscribeTeachers = onSnapshot(teachersQ, (snapshot) => {
-      setTeachers(snapshot.docs.map(doc => doc.data() as UserProfile));
+    const unsubscribeStaff = onSnapshot(staffQ, (snapshot) => {
+      setStaff(snapshot.docs.map(doc => doc.data() as UserProfile));
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'users', user || undefined);
     });
@@ -86,17 +86,20 @@ export const SchoolAdminDashboard: React.FC = () => {
 
     return () => {
       unsubscribeAnn();
-      unsubscribeTeachers();
+      unsubscribeStaff();
       unsubscribeRequests();
       unsubscribeParents();
     };
   }, [profile?.schoolId]);
 
   const handleApproveRequest = async (request: VisitorMessage) => {
+    if (!profile?.schoolId) return;
     try {
       await updateDoc(doc(db, 'users', request.uid), {
         role: request.requestedRole,
-        status: 'active'
+        schoolId: profile.schoolId,
+        status: 'active',
+        updatedAt: serverTimestamp()
       });
       await updateDoc(doc(db, 'visitor_messages', request.id), {
         status: 'read'
@@ -140,6 +143,9 @@ export const SchoolAdminDashboard: React.FC = () => {
     if (!profile?.schoolId) return;
     setAddTeacherStatus(null);
 
+    const roleSelect = document.getElementById('staffRole') as HTMLSelectElement;
+    const selectedRole = roleSelect?.value || 'teacher';
+
     try {
       // Find user by email
       const usersRef = collection(db, 'users');
@@ -155,22 +161,23 @@ export const SchoolAdminDashboard: React.FC = () => {
       const userData = userDoc.data() as UserProfile;
 
       if (userData.role === 'system_admin') {
-        setAddTeacherStatus({ type: 'error', message: 'Cannot assign System Admin as a teacher.' });
+        setAddTeacherStatus({ type: 'error', message: 'Cannot assign System Admin as a staff member.' });
         return;
       }
 
       await updateDoc(doc(db, 'users', userDoc.id), {
-        role: 'teacher',
+        role: selectedRole,
         schoolId: profile.schoolId,
-        status: 'active'
+        status: 'active',
+        updatedAt: serverTimestamp()
       });
 
-      setAddTeacherStatus({ type: 'success', message: `Successfully added ${userData.displayName || teacherEmail} as a teacher.` });
+      setAddTeacherStatus({ type: 'success', message: `Successfully added ${userData.displayName || teacherEmail} as a ${selectedRole.replace('_', ' ')}.` });
       setTeacherEmail('');
       setIsAddingTeacher(false);
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, 'users', user || undefined);
-      setAddTeacherStatus({ type: 'error', message: 'Failed to add teacher. Please try again.' });
+      setAddTeacherStatus({ type: 'error', message: 'Failed to add staff member. Please try again.' });
     }
   };
 
@@ -203,13 +210,13 @@ export const SchoolAdminDashboard: React.FC = () => {
           {activeTab === 'announcements' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
         </button>
         <button 
-          onClick={() => setActiveTab('teachers')}
+          onClick={() => setActiveTab('staff')}
           className={`pb-4 px-2 text-sm font-bold transition-all relative ${
-            activeTab === 'teachers' ? 'text-blue-600' : 'text-slate-400'
+            activeTab === 'staff' ? 'text-blue-600' : 'text-slate-400'
           }`}
         >
-          Teachers
-          {activeTab === 'teachers' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
+          Staff Management
+          {activeTab === 'staff' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
         </button>
         <button 
           onClick={() => setActiveTab('requests')}
@@ -306,8 +313,8 @@ export const SchoolAdminDashboard: React.FC = () => {
             <h3 className="font-bold mb-4">School Statistics</h3>
             <div className="space-y-4">
               <div className="flex justify-between items-center">
-                <span className="text-slate-400 text-sm">Active Teachers</span>
-                <span className="font-bold">{teachers.length}</span>
+                <span className="text-slate-400 text-sm">Active Staff</span>
+                <span className="font-bold">{staff.length}</span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-slate-400 text-sm">Total Announcements</span>
@@ -321,18 +328,18 @@ export const SchoolAdminDashboard: React.FC = () => {
           </div>
         </div>
       </div>
-      ) : activeTab === 'teachers' ? (
+      ) : activeTab === 'staff' ? (
         <div className="space-y-6">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 text-slate-900 dark:text-white font-bold">
               <Users className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-              School Teachers
+              School Staff
             </div>
             <button 
               onClick={() => setIsAddingTeacher(true)}
               className="px-4 py-2 bg-slate-900 dark:bg-slate-800 text-white rounded-xl text-sm font-bold flex items-center gap-2"
             >
-              <Plus className="w-4 h-4" /> Add Teacher
+              <Plus className="w-4 h-4" /> Add Staff Member
             </button>
           </div>
 
@@ -345,16 +352,30 @@ export const SchoolAdminDashboard: React.FC = () => {
                 onSubmit={handleAddTeacher}
                 className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-blue-100 dark:border-slate-800 shadow-sm space-y-4 overflow-hidden"
               >
-                <div className="flex flex-col gap-2">
-                  <label className="text-xs font-bold text-slate-500 uppercase px-1">Teacher Email Address</label>
-                  <input 
-                    type="email" 
-                    placeholder="teacher@school.com" 
-                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
-                    value={teacherEmail}
-                    onChange={(e) => setTeacherEmail(e.target.value)}
-                    required
-                  />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="flex flex-col gap-2">
+                    <label className="text-xs font-bold text-slate-500 uppercase px-1">Email Address</label>
+                    <input 
+                      type="email" 
+                      placeholder="staff@school.com" 
+                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
+                      value={teacherEmail}
+                      onChange={(e) => setTeacherEmail(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <label className="text-xs font-bold text-slate-500 uppercase px-1">Role</label>
+                    <select 
+                      id="staffRole"
+                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
+                      defaultValue="teacher"
+                    >
+                      <option value="teacher">General Teacher</option>
+                      <option value="quran_teacher">Quran Teacher</option>
+                      <option value="sports_coach">Sports Coach</option>
+                    </select>
+                  </div>
                 </div>
                 {addTeacherStatus && (
                   <div className={`p-3 rounded-xl text-xs font-bold ${addTeacherStatus.type === 'success' ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'}`}>
@@ -373,7 +394,7 @@ export const SchoolAdminDashboard: React.FC = () => {
                     type="submit"
                     className="px-6 py-2 bg-blue-600 text-white rounded-xl font-semibold"
                   >
-                    Add Teacher
+                    Add Staff Member
                   </button>
                 </div>
               </motion.form>
@@ -381,25 +402,40 @@ export const SchoolAdminDashboard: React.FC = () => {
           </AnimatePresence>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {teachers.map((teacher) => (
-              <div key={teacher.uid} className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm">
+            {staff.map((member) => (
+              <div key={member.uid} className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm">
                 <div className="flex items-center gap-4 mb-4">
                   <div className="w-12 h-12 bg-blue-50 dark:bg-blue-900/30 rounded-2xl flex items-center justify-center text-blue-600 font-black text-xl">
-                    {teacher.displayName?.[0] || 'T'}
+                    {member.displayName?.[0] || 'S'}
                   </div>
                   <div>
-                    <h4 className="font-bold text-slate-900 dark:text-white">{teacher.displayName || 'Unnamed Teacher'}</h4>
-                    <p className="text-xs text-slate-500">{teacher.email}</p>
+                    <h4 className="font-bold text-slate-900 dark:text-white">{member.displayName || 'Unnamed Staff'}</h4>
+                    <p className="text-xs text-slate-500">{member.email}</p>
+                    <span className="text-[10px] font-black uppercase text-blue-600 bg-blue-50 dark:bg-blue-900/20 px-2 py-0.5 rounded-full mt-1 inline-block">
+                      {member.role?.replace('_', ' ')}
+                    </span>
                   </div>
                 </div>
                 <div className="flex justify-between items-center pt-4 border-t border-slate-50 dark:border-slate-800">
-                  <span className="text-xs font-bold text-emerald-500 uppercase">Active</span>
-                  <button className="text-xs font-bold text-blue-600 hover:underline">View Profile</button>
+                  <span className={`text-xs font-bold uppercase ${member.status === 'active' ? 'text-emerald-500' : 'text-amber-500'}`}>
+                    {member.status}
+                  </span>
+                  <div className="flex gap-2">
+                    {member.status === 'pending' && (
+                      <button 
+                        onClick={() => handleApproveRequest({ uid: member.uid, id: '', email: member.email, displayName: member.displayName || '', requestedRole: member.role || 'teacher', message: '', createdAt: null, status: 'unread' })}
+                        className="text-xs font-bold text-emerald-600 hover:underline"
+                      >
+                        Activate
+                      </button>
+                    )}
+                    <button className="text-xs font-bold text-blue-600 hover:underline">View Profile</button>
+                  </div>
                 </div>
               </div>
             ))}
-            {teachers.length === 0 && !isAddingTeacher && (
-              <div className="col-span-full text-center py-20 text-slate-400 italic">No teachers registered yet.</div>
+            {staff.length === 0 && !isAddingTeacher && (
+              <div className="col-span-full text-center py-20 text-slate-400 italic">No staff members registered yet.</div>
             )}
           </div>
         </div>
@@ -407,9 +443,9 @@ export const SchoolAdminDashboard: React.FC = () => {
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
           <div className="lg:col-span-1 space-y-4">
             <div className="bg-white dark:bg-slate-900 p-4 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm">
-              <h3 className="text-xs font-bold text-slate-400 uppercase mb-4 px-2">Teachers</h3>
+              <h3 className="text-xs font-bold text-slate-400 uppercase mb-4 px-2">Staff</h3>
               <div className="space-y-1">
-                {teachers.map(t => (
+                {staff.map(t => (
                   <button
                     key={t.uid}
                     onClick={() => setSelectedContact(t)}

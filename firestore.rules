@@ -63,10 +63,11 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return isAuthenticated() && 
-        ((request.auth.token.email == "bsami04bsami@gmail.com" && request.auth.token.email_verified == true) ||
-         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'system_admin'));
+      return isAuthenticated() && (
+        ((request.auth.token.email == "bsami0004bsami@gmail.com" || request.auth.token.email == "bsami04bsami@gmail.com") && request.auth.token.email_verified == true) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'system_admin')
+      );
     }
 
     function isSchoolAdmin(schoolId) {
@@ -103,13 +104,15 @@ service cloud.firestore {
     // Domain Validators
     // ===============================================================
     function isValidUser(data) {
-      return hasOnlyAllowedFields(['uid', 'email', 'displayName', 'role', 'status', 'requestedRole', 'requestMessage', 'updatedAt', 'isDarkMode', 'createdAt', 'schoolId', 'parentId', 'childIds']) &&
+      return hasOnlyAllowedFields(['uid', 'email', 'displayName', 'photoURL', 'photoUrl', 'role', 'status', 'requestedRole', 'requestMessage', 'updatedAt', 'isDarkMode', 'createdAt', 'schoolId', 'parentId', 'childIds']) &&
              (data.uid is string) && 
              (data.email is string) &&
              (!('role' in data) || data.role in ['system_admin', 'school_admin', 'teacher', 'parent', 'child', 'visitor']) &&
              (!('status' in data) || data.status in ['active', 'blocked']) &&
              (!('createdAt' in data) || data.createdAt is timestamp) &&
              (!('displayName' in data) || (data.displayName is string && data.displayName.size() < 100)) &&
+             (!('photoURL' in data) || (data.photoURL is string || data.photoURL == null)) &&
+             (!('photoUrl' in data) || (data.photoUrl is string || data.photoUrl == null)) &&
              (!('requestedRole' in data) || data.requestedRole in ['teacher', 'parent', 'child']) &&
              (!('requestMessage' in data) || (data.requestMessage is string && data.requestMessage.size() < 1000)) &&
              (!('isDarkMode' in data) || data.isDarkMode is bool) &&
@@ -128,14 +131,15 @@ service cloud.firestore {
     }
 
     function isValidStudent(data) {
-      return hasOnlyAllowedFields(['id', 'childUid', 'parentUid', 'schoolId', 'teacherId', 'name', 'grade', 'location']) &&
+      return hasOnlyAllowedFields(['id', 'childUid', 'parentUid', 'schoolId', 'teacherId', 'name', 'grade', 'location', 'updatedAt']) &&
              data.id is string &&
              data.childUid is string &&
              data.parentUid is string &&
              data.schoolId is string &&
              data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
              data.grade is string && data.grade.size() > 0 && data.grade.size() < 20 &&
-             (!('location' in data) || (data.location is map && data.location.lat is number && data.location.lng is number));
+             (!('location' in data) || (data.location is map && data.location.lat is number && data.location.lng is number)) &&
+             (!('updatedAt' in data) || data.updatedAt is timestamp);
     }
 
     function isValidAnnouncement(data) {
@@ -218,7 +222,7 @@ service cloud.firestore {
           resource.data.role == 'teacher' ||
           (resource.data.role == 'parent' && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['teacher', 'school_admin', 'system_admin']) ||
           (resource.data.role == 'child' && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (
-            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['teacher', 'school_admin', 'system_admin'] ||
+            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['teacher', 'school_admin', 'system_admin', 'parent'] ||
             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.uid == resource.data.parentId
           ))
         ))
@@ -228,7 +232,7 @@ service cloud.firestore {
                     hasRequiredFields(['uid', 'email', 'status', 'createdAt']) &&
                     (!('role' in request.resource.data) || 
                      request.resource.data.role == 'visitor' ||
-                     (request.resource.data.role == 'system_admin' && request.auth.token.email == "bsami04bsami@gmail.com"));
+                     (request.resource.data.role == 'system_admin' && (request.auth.token.email == "bsami0004bsami@gmail.com" || request.auth.token.email == "bsami04bsami@gmail.com")));
       allow update: if isAuthenticated() && (
         isAdmin() || (
           isOwner(userId) && 
@@ -250,7 +254,7 @@ service cloud.firestore {
           // Parent linking a child
           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'parent' &&
           resource.data.role == 'child' &&
-          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['parentId']) &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['parentId', 'updatedAt']) &&
           request.resource.data.parentId == request.auth.uid &&
           isValidUser(request.resource.data)
         )
@@ -270,7 +274,8 @@ service cloud.firestore {
         request.auth.uid == resource.data.childUid || 
         request.auth.uid == resource.data.parentUid ||
         isTeacher(resource.data.schoolId) ||
-        isSchoolAdmin(resource.data.schoolId)
+        isSchoolAdmin(resource.data.schoolId) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'parent')
       );
       allow create: if (isAdmin() || isSchoolAdmin(request.resource.data.schoolId)) && isValidStudent(request.resource.data);
       allow update: if isAuthenticated() && isValidStudent(request.resource.data) && (
@@ -284,8 +289,9 @@ service cloud.firestore {
         (
           // Parent linking a child
           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'parent' &&
-          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['parentUid']) &&
-          request.resource.data.parentUid == request.auth.uid
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['parentUid', 'updatedAt']) &&
+          request.resource.data.parentUid == request.auth.uid &&
+          isValidStudent(request.resource.data)
         )
       );
     }

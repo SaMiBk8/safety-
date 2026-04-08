@@ -13,13 +13,22 @@ import { auth } from './lib/firebase';
 // Basic Login Component
 const Login = () => {
   const { user, loading } = useAuth();
+  const [error, setError] = useState<string | null>(null);
   
   const handleLogin = async () => {
+    setError(null);
     const provider = new GoogleAuthProvider();
     try {
       await signInWithPopup(auth, provider);
-    } catch (error) {
-      console.error("Login failed:", error);
+    } catch (err: any) {
+      console.error("Login failed:", err);
+      if (err.code === 'auth/popup-blocked') {
+        setError("Sign-in popup was blocked by your browser. Please allow popups for this site.");
+      } else if (err.code === 'auth/unauthorized-domain') {
+        setError("This domain is not authorized for sign-in. Please contact the administrator.");
+      } else {
+        setError("Login failed: " + (err.message || "Unknown error"));
+      }
     }
   };
 
@@ -41,6 +50,12 @@ const Login = () => {
         <h1 className="text-2xl font-bold text-slate-900 mb-2">SafeChild</h1>
         <p className="text-slate-500 mb-8 italic">Professional Child Safety & Educational Coordination</p>
         
+        {error && (
+          <div className="mb-6 p-4 bg-red-50 border border-red-100 text-red-600 text-sm rounded-xl">
+            {error}
+          </div>
+        )}
+        
         <button 
           onClick={handleLogin}
           className="w-full py-4 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-all active:scale-95 shadow-lg shadow-blue-100 flex items-center justify-center gap-2"
@@ -61,6 +76,9 @@ const Login = () => {
 import { SystemAdminDashboard } from './components/dashboards/SystemAdminDashboard';
 import { SchoolAdminDashboard } from './components/dashboards/SchoolAdminDashboard';
 import { TeacherDashboard } from './components/dashboards/TeacherDashboard';
+import { QuranTeacherDashboard } from './components/dashboards/QuranTeacherDashboard';
+import { SportsCoachDashboard } from './components/dashboards/SportsCoachDashboard';
+import { AuthorizedPersonDashboard } from './components/dashboards/AuthorizedPersonDashboard';
 import { ParentDashboard } from './components/dashboards/ParentDashboard';
 import { ChildDashboard } from './components/dashboards/ChildDashboard';
 import { VisitorDashboard } from './components/dashboards/VisitorDashboard';
@@ -68,12 +86,47 @@ import { VideoCall } from './components/VideoCall';
 import { Sun, Moon } from 'lucide-react';
 
 const Dashboard = () => {
-  const { user, profile, loading, isAdmin, isSchoolAdmin, isTeacher, isParent, isChild, isVisitor } = useAuth();
+  const { user, profile, loading, isAdmin, isSchoolAdmin, isTeacher, isQuranTeacher, isSportsCoach, isParent, isChild, isAuthorizedPerson, isVisitor, isPending } = useAuth();
   const [isDarkMode, setIsDarkMode] = useState(() => {
     const saved = localStorage.getItem('darkMode');
     return saved ? JSON.parse(saved) : false;
   });
   const [activeCall, setActiveCall] = useState<{ channel: string } | null>(null);
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [showInstallBanner, setShowInstallBanner] = useState(false);
+  const [isIOS, setIsIOS] = useState(false);
+
+  useEffect(() => {
+    const isIOSDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone;
+    
+    if (isIOSDevice && !isStandalone) {
+      setIsIOS(true);
+      setShowInstallBanner(true);
+    }
+
+    const handleBeforeInstallPrompt = (e: any) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      setShowInstallBanner(true);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    };
+  }, []);
+
+  const handleInstallClick = async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    if (outcome === 'accepted') {
+      setDeferredPrompt(null);
+      setShowInstallBanner(false);
+    }
+  };
   
   useEffect(() => {
     if (isDarkMode) {
@@ -126,7 +179,47 @@ const Dashboard = () => {
         </div>
       </nav>
 
-      <main className="max-w-7xl mx-auto px-8 py-8">
+      <main className="max-w-7xl mx-auto px-8 py-8 pb-24 sm:pb-8">
+        {showInstallBanner && (
+          <motion.div 
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-6 bg-blue-600 text-white p-4 rounded-2xl flex items-center justify-between shadow-lg"
+          >
+            <div className="flex items-center gap-3">
+              <div className="bg-white/20 p-2 rounded-lg">
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+              </div>
+              <div>
+                <div className="font-bold">Install SafeChild</div>
+                <div className="text-xs text-blue-100">
+                  {isIOS 
+                    ? "Tap 'Share' and then 'Add to Home Screen'" 
+                    : "Add to home screen for the best experience"}
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button 
+                onClick={() => setShowInstallBanner(false)}
+                className="px-3 py-1.5 text-sm font-medium hover:bg-white/10 rounded-lg transition-colors"
+              >
+                {isIOS ? "Dismiss" : "Later"}
+              </button>
+              {!isIOS && (
+                <button 
+                  onClick={handleInstallClick}
+                  className="px-4 py-1.5 bg-white text-blue-600 text-sm font-bold rounded-lg hover:bg-blue-50 transition-colors"
+                >
+                  Install
+                </button>
+              )}
+            </div>
+          </motion.div>
+        )}
+
         {profile?.status === 'blocked' && (
           <motion.div 
             initial={{ opacity: 0, scale: 0.95 }}
@@ -145,17 +238,46 @@ const Dashboard = () => {
           </motion.div>
         )}
 
-        {profile?.status !== 'blocked' && isVisitor && <VisitorDashboard />}
+        {profile?.status === 'pending' && (
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-amber-50 dark:bg-amber-900/10 border border-amber-100 dark:border-amber-900/20 p-8 rounded-3xl text-center max-w-2xl mx-auto"
+          >
+            <div className="w-16 h-16 bg-amber-100 dark:bg-amber-900/20 rounded-2xl flex items-center justify-center mb-4 mx-auto">
+              <svg className="w-8 h-8 text-amber-600 dark:text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <h2 className="text-xl font-bold text-amber-900 dark:text-amber-100 mb-2">Registration Pending</h2>
+            <p className="text-amber-700 dark:text-amber-300">
+              Your account has been created and is currently waiting for administrator approval. You will be notified once your account is activated.
+            </p>
+            <div className="mt-6">
+              <button 
+                onClick={() => signOut(auth)}
+                className="px-6 py-2 bg-amber-600 text-white rounded-xl font-semibold hover:bg-amber-700 transition-all"
+              >
+                Sign Out
+              </button>
+            </div>
+          </motion.div>
+        )}
+
+        {profile?.status === 'active' && isVisitor && <VisitorDashboard />}
         
         {profile?.status === 'active' && !isVisitor && (
           <>
             {isAdmin && <SystemAdminDashboard />}
             {isSchoolAdmin && <SchoolAdminDashboard />}
             {isTeacher && <TeacherDashboard />}
+            {isQuranTeacher && <QuranTeacherDashboard />}
+            {isSportsCoach && <SportsCoachDashboard />}
             {isParent && <ParentDashboard onStartCall={(channel) => setActiveCall({ channel })} />}
             {isChild && <ChildDashboard onStartCall={(channel) => setActiveCall({ channel })} />}
+            {isAuthorizedPerson && <AuthorizedPersonDashboard />}
             
-            {profile.role && !isAdmin && !isSchoolAdmin && !isTeacher && !isParent && !isChild && (
+            {profile.role && !isAdmin && !isSchoolAdmin && !isTeacher && !isParent && !isChild && !isQuranTeacher && !isSportsCoach && !isAuthorizedPerson && (
               <div className="text-center py-20">
                 <h2 className="text-2xl font-bold text-slate-400">Dashboard for {profile.role} is coming soon...</h2>
               </div>
@@ -164,9 +286,35 @@ const Dashboard = () => {
         )}
       </main>
 
+      {/* Mobile Bottom Navigation */}
+      <div className="sm:hidden fixed bottom-0 left-0 right-0 bg-white dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800 px-6 py-3 flex justify-around items-center z-50 pb-safe">
+        <button className="flex flex-col items-center gap-1 text-blue-600 dark:text-blue-400">
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+          </svg>
+          <span className="text-[10px] font-bold uppercase tracking-wider">Home</span>
+        </button>
+        <button 
+          onClick={() => setIsDarkMode(!isDarkMode)}
+          className="flex flex-col items-center gap-1 text-slate-400"
+        >
+          {isDarkMode ? <Sun className="w-6 h-6" /> : <Moon className="w-6 h-6" />}
+          <span className="text-[10px] font-bold uppercase tracking-wider">Theme</span>
+        </button>
+        <button 
+          onClick={() => signOut(auth)}
+          className="flex flex-col items-center gap-1 text-slate-400"
+        >
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+          </svg>
+          <span className="text-[10px] font-bold uppercase tracking-wider">Exit</span>
+        </button>
+      </div>
+
       {activeCall && (
         <VideoCall 
-          appId="YOUR_AGORA_APP_ID" // User needs to provide this
+          appId={import.meta.env.VITE_AGORA_APP_ID || ""}
           channel={activeCall.channel}
           onClose={() => setActiveCall(null)}
         />
@@ -176,6 +324,38 @@ const Dashboard = () => {
 };
 
 export default function App() {
+  const [isSplashVisible, setIsSplashVisible] = useState(true);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setIsSplashVisible(false), 2000);
+    return () => clearTimeout(timer);
+  }, []);
+
+  if (isSplashVisible) {
+    return (
+      <div className="fixed inset-0 bg-blue-600 flex flex-col items-center justify-center z-[9999]">
+        <motion.div
+          initial={{ scale: 0.8, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={{ duration: 0.5 }}
+          className="w-24 h-24 bg-white rounded-3xl flex items-center justify-center shadow-2xl"
+        >
+          <svg className="w-12 h-12 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+          </svg>
+        </motion.div>
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.3 }}
+          className="mt-6 text-white font-bold text-2xl tracking-tight"
+        >
+          SafeChild
+        </motion.div>
+      </div>
+    );
+  }
+
   return (
     <AuthProvider>
       <Router>

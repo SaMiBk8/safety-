@@ -26,7 +26,7 @@ export const SystemAdminDashboard: React.FC = () => {
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [messages, setMessages] = useState<VisitorMessage[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeTab, setActiveTab] = useState<'users' | 'messages' | 'schools'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'pending' | 'messages' | 'schools' | 'relationships'>('users');
   const [schools, setSchools] = useState<School[]>([]);
   const [isAddingSchool, setIsAddingSchool] = useState(false);
   const [newSchool, setNewSchool] = useState({ name: '', address: '', adminEmail: '' });
@@ -79,6 +79,14 @@ export const SystemAdminDashboard: React.FC = () => {
     const newStatus = currentStatus === 'active' ? 'blocked' : 'active';
     try {
       await updateDoc(doc(db, 'users', uid), { status: newStatus });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `users/${uid}`, user || undefined);
+    }
+  };
+
+  const approveUser = async (uid: string) => {
+    try {
+      await updateDoc(doc(db, 'users', uid), { status: 'active' });
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `users/${uid}`, user || undefined);
     }
@@ -229,6 +237,20 @@ export const SystemAdminDashboard: React.FC = () => {
           {activeTab === 'users' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
         </button>
         <button 
+          onClick={() => setActiveTab('pending')}
+          className={`pb-4 px-2 text-sm font-bold transition-all relative flex items-center gap-2 ${
+            activeTab === 'pending' ? 'text-blue-600' : 'text-slate-400'
+          }`}
+        >
+          Inscription Requests
+          {users.filter(u => u.status === 'pending').length > 0 && (
+            <span className="px-1.5 py-0.5 bg-amber-500 text-white text-[10px] rounded-full">
+              {users.filter(u => u.status === 'pending').length}
+            </span>
+          )}
+          {activeTab === 'pending' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
+        </button>
+        <button 
           onClick={() => setActiveTab('messages')}
           className={`pb-4 px-2 text-sm font-bold transition-all relative flex items-center gap-2 ${
             activeTab === 'messages' ? 'text-blue-600' : 'text-slate-400'
@@ -248,6 +270,15 @@ export const SystemAdminDashboard: React.FC = () => {
         >
           School Management
           {activeTab === 'schools' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
+        </button>
+        <button 
+          onClick={() => setActiveTab('relationships')}
+          className={`pb-4 px-2 text-sm font-bold transition-all relative flex items-center gap-2 ${
+            activeTab === 'relationships' ? 'text-blue-600' : 'text-slate-400'
+          }`}
+        >
+          Relationships
+          {activeTab === 'relationships' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
         </button>
       </div>
 
@@ -284,7 +315,7 @@ export const SystemAdminDashboard: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
-                {filteredUsers.map((user) => (
+                {filteredUsers.filter(u => u.status !== 'pending').map((user) => (
                   <motion.tr 
                     layout
                     key={user.uid} 
@@ -328,10 +359,13 @@ export const SystemAdminDashboard: React.FC = () => {
                       >
                         <option value="visitor">Visitor</option>
                         <option value="system_admin">System Admin</option>
-                        <option value="school_admin">School Admin</option>
+                        <option value="school_admin">School Staff</option>
                         <option value="teacher">Teacher</option>
+                        <option value="quran_teacher">Quran Teacher</option>
+                        <option value="sports_coach">Sports Coach</option>
                         <option value="parent">Parent</option>
                         <option value="child">Child</option>
+                        <option value="authorized_person">Authorized Person</option>
                       </select>
                     </td>
                     <td className="p-4">
@@ -359,6 +393,162 @@ export const SystemAdminDashboard: React.FC = () => {
             </table>
           </div>
         </>
+      ) : activeTab === 'pending' ? (
+        <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-800 overflow-hidden">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-slate-50 dark:bg-slate-800/50 border-bottom border-slate-100 dark:border-slate-800">
+                <th className="p-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">User</th>
+                <th className="p-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Requested Role</th>
+                <th className="p-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Message</th>
+                <th className="p-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
+              {users.filter(u => u.status === 'pending').map((user) => (
+                <tr key={user.uid} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors">
+                  <td className="p-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-slate-200 dark:bg-slate-800 rounded-full flex items-center justify-center text-slate-600 dark:text-slate-400 font-bold">
+                        {user.displayName?.[0] || user.email[0].toUpperCase()}
+                      </div>
+                      <div>
+                        <div className="font-semibold text-slate-900 dark:text-white">{user.displayName || 'No Name'}</div>
+                        <div className="text-xs text-slate-500 dark:text-slate-400">{user.email}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="p-4">
+                    <span className="px-2 py-1 bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 rounded-lg text-[10px] font-black uppercase tracking-wider">
+                      {user.requestedRole || 'visitor'}
+                    </span>
+                  </td>
+                  <td className="p-4">
+                    <p className="text-xs text-slate-500 dark:text-slate-400 max-w-xs truncate">{user.requestMessage || 'No message'}</p>
+                  </td>
+                  <td className="p-4 text-right space-x-2">
+                    <button 
+                      onClick={() => approveUser(user.uid)}
+                      className="px-4 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 transition-colors"
+                    >
+                      Approve
+                    </button>
+                    <button 
+                      onClick={() => toggleUserStatus(user.uid, 'active')}
+                      className="px-4 py-2 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-xl text-xs font-bold hover:bg-red-100 transition-colors"
+                    >
+                      Block
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {users.filter(u => u.status === 'pending').length === 0 && (
+                <tr>
+                  <td colSpan={4} className="p-10 text-center text-slate-400 italic">No pending inscription requests.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      ) : activeTab === 'relationships' ? (
+        <div className="space-y-6">
+          <div className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 shadow-sm">
+            <h3 className="text-xl font-black text-slate-900 dark:text-white mb-6 uppercase tracking-tight">Link Parent to Child</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-slate-400 uppercase px-1">Parent Email</label>
+                <input 
+                  type="email" 
+                  id="parentEmail"
+                  placeholder="parent@email.com" 
+                  className="w-full px-6 py-4 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-slate-400 uppercase px-1">Child Email</label>
+                <input 
+                  type="email" 
+                  id="childEmail"
+                  placeholder="child@email.com" 
+                  className="w-full px-6 py-4 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
+                />
+              </div>
+            </div>
+            <button 
+              onClick={async () => {
+                const pEmail = (document.getElementById('parentEmail') as HTMLInputElement).value.toLowerCase();
+                const cEmail = (document.getElementById('childEmail') as HTMLInputElement).value.toLowerCase();
+                if (!pEmail || !cEmail) return;
+
+                try {
+                  const pUser = users.find(u => u.email.toLowerCase() === pEmail && u.role === 'parent');
+                  const cUser = users.find(u => u.email.toLowerCase() === cEmail && u.role === 'child');
+
+                  if (!pUser || !cUser) {
+                    alert('Parent or Child not found with these emails and roles.');
+                    return;
+                  }
+
+                  await updateDoc(doc(db, 'users', pUser.uid), {
+                    childIds: arrayUnion(cUser.uid),
+                    updatedAt: serverTimestamp()
+                  });
+
+                  await updateDoc(doc(db, 'users', cUser.uid), {
+                    parentId: pUser.uid,
+                    updatedAt: serverTimestamp()
+                  });
+
+                  alert('Successfully linked parent and child.');
+                  (document.getElementById('parentEmail') as HTMLInputElement).value = '';
+                  (document.getElementById('childEmail') as HTMLInputElement).value = '';
+                } catch (error) {
+                  console.error(error);
+                  alert('Failed to link accounts.');
+                }
+              }}
+              className="mt-6 px-8 py-4 bg-blue-600 text-white rounded-2xl font-bold shadow-lg shadow-blue-100 dark:shadow-none hover:bg-blue-700 transition-all"
+            >
+              Link Accounts
+            </button>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm overflow-hidden">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-slate-50 dark:bg-slate-800/50 border-bottom border-slate-100 dark:border-slate-800">
+                  <th className="p-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Parent</th>
+                  <th className="p-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Children</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
+                {users.filter(u => u.role === 'parent').map(parent => (
+                  <tr key={parent.uid}>
+                    <td className="p-4">
+                      <div className="font-bold text-slate-900 dark:text-white">{parent.displayName || parent.email}</div>
+                      <div className="text-xs text-slate-500">{parent.email}</div>
+                    </td>
+                    <td className="p-4">
+                      <div className="flex flex-wrap gap-2">
+                        {parent.childIds?.map(childId => {
+                          const child = users.find(u => u.uid === childId);
+                          return (
+                            <span key={childId} className="px-2 py-1 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded-lg text-[10px] font-bold">
+                              {child?.displayName || child?.email || childId}
+                            </span>
+                          );
+                        })}
+                        {(!parent.childIds || parent.childIds.length === 0) && (
+                          <span className="text-slate-300 italic text-xs">No children linked</span>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       ) : activeTab === 'messages' ? (
         <div className="space-y-4">
           {messages.map((msg) => (

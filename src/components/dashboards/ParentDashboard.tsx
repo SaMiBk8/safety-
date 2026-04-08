@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { collection, query, where, onSnapshot, doc, updateDoc, getDoc, getDocs, arrayUnion } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, updateDoc, getDoc, getDocs, arrayUnion, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useAuth } from '../../context/AuthContext';
 import { Student, Announcement, SOSAlert } from '../../types';
@@ -56,7 +56,7 @@ export const ParentDashboard: React.FC<{ onStartCall?: (channel: string) => void
   
   const { isLoaded } = useJsApiLoader({
     id: 'google-map-script',
-    googleMapsApiKey: "YOUR_GOOGLE_MAPS_API_KEY"
+    googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || ""
   });
 
   // Listen for children
@@ -142,24 +142,27 @@ export const ParentDashboard: React.FC<{ onStartCall?: (channel: string) => void
       
       // Update student record
       await updateDoc(doc(db, 'students', studentDoc.id), {
-        parentUid: profile.uid
+        parentUid: profile.uid,
+        updatedAt: serverTimestamp()
       });
 
       // Update parent profile
       await updateDoc(doc(db, 'users', profile.uid), {
-        childIds: arrayUnion(childDoc.id)
+        childIds: arrayUnion(childDoc.id),
+        updatedAt: serverTimestamp()
       });
 
       // Update child profile
       await updateDoc(doc(db, 'users', childDoc.id), {
-        parentId: profile.uid
+        parentId: profile.uid,
+        updatedAt: serverTimestamp()
       });
 
       setAddChildStatus({ type: 'success', message: `Successfully linked ${childData.displayName || childEmail} as your child.` });
       setChildEmail('');
       setIsAddingChild(false);
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, 'users', user || undefined);
+      handleFirestoreError(error, OperationType.UPDATE, 'users/profile or users/child', user || undefined);
       setAddChildStatus({ type: 'error', message: 'Failed to link child. Please try again.' });
     }
   };

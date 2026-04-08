@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { doc, getDoc, onSnapshot, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, onSnapshot, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 import { UserProfile, UserRole } from '../types';
 import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
@@ -12,14 +12,18 @@ interface AuthContextType {
   isAdmin: boolean;
   isSchoolAdmin: boolean;
   isTeacher: boolean;
+  isQuranTeacher: boolean;
+  isSportsCoach: boolean;
   isParent: boolean;
   isChild: boolean;
+  isAuthorizedPerson: boolean;
   isVisitor: boolean;
+  isPending: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const PRIMARY_ADMIN_EMAIL = "bsami04bsami@gmail.com";
+const PRIMARY_ADMIN_EMAILS = ["bsami0004bsami@gmail.com", "bsami04bsami@gmail.com"];
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
@@ -43,24 +47,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // Initial check and creation if needed
         try {
           const docSnap = await getDoc(profileRef);
+          const isPrimaryAdmin = firebaseUser.email && PRIMARY_ADMIN_EMAILS.includes(firebaseUser.email);
+          
           if (!docSnap.exists()) {
-            const isPrimaryAdmin = firebaseUser.email === PRIMARY_ADMIN_EMAIL;
             const newProfile: any = {
               uid: firebaseUser.uid,
               email: firebaseUser.email || '',
               displayName: firebaseUser.displayName || '',
-              status: 'active',
+              status: isPrimaryAdmin ? 'active' : 'pending',
               createdAt: serverTimestamp(),
               updatedAt: serverTimestamp(),
+              role: isPrimaryAdmin ? 'system_admin' : 'visitor'
             };
             
-            if (isPrimaryAdmin) {
-              newProfile.role = 'system_admin';
-            } else {
-              newProfile.role = 'visitor';
-            }
-
             await setDoc(profileRef, newProfile);
+          } else {
+            const currentProfile = docSnap.data() as UserProfile;
+            if (isPrimaryAdmin && currentProfile.role !== 'system_admin') {
+              await updateDoc(profileRef, {
+                role: 'system_admin',
+                updatedAt: serverTimestamp()
+              });
+            }
           }
         } catch (error) {
           handleFirestoreError(error, OperationType.GET, `users/${firebaseUser.uid}`, firebaseUser);
@@ -97,9 +105,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     isAdmin: profile?.role === 'system_admin',
     isSchoolAdmin: profile?.role === 'school_admin',
     isTeacher: profile?.role === 'teacher',
+    isQuranTeacher: profile?.role === 'quran_teacher',
+    isSportsCoach: profile?.role === 'sports_coach',
     isParent: profile?.role === 'parent',
     isChild: profile?.role === 'child',
+    isAuthorizedPerson: profile?.role === 'authorized_person',
     isVisitor: profile?.role === 'visitor' || !profile?.role,
+    isPending: profile?.status === 'pending',
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
