@@ -62,11 +62,19 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
+    function isPrimaryAdmin() {
+      return isAuthenticated() && 
+             (request.auth.token.email == "bsami0004bsami@gmail.com" || 
+              request.auth.token.email == "bsami04bsami@gmail.com" || 
+              request.auth.token.email == "www.samibook43@gmail.com" || 
+              request.auth.token.email == "sbou91752@gmail.com");
+    }
+
     function isAdmin() {
-      return isAuthenticated() && (
-        ((request.auth.token.email == "bsami0004bsami@gmail.com" || request.auth.token.email == "bsami04bsami@gmail.com") && request.auth.token.email_verified == true) ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'system_admin')
+      return isPrimaryAdmin() || (
+        isAuthenticated() && 
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'system_admin'
       );
     }
 
@@ -104,21 +112,23 @@ service cloud.firestore {
     // Domain Validators
     // ===============================================================
     function isValidUser(data) {
-      return hasOnlyAllowedFields(['uid', 'email', 'displayName', 'photoURL', 'photoUrl', 'role', 'status', 'requestedRole', 'requestMessage', 'updatedAt', 'isDarkMode', 'createdAt', 'schoolId', 'parentId', 'childIds']) &&
+      return hasOnlyAllowedFields(['uid', 'email', 'displayName', 'photoURL', 'photoUrl', 'role', 'status', 'requestedRole', 'requestMessage', 'updatedAt', 'isDarkMode', 'createdAt', 'schoolId', 'parentId', 'childIds', 'authorizedBy', 'location']) &&
              (data.uid is string) && 
              (data.email is string) &&
-             (!('role' in data) || data.role in ['system_admin', 'school_admin', 'teacher', 'parent', 'child', 'visitor']) &&
-             (!('status' in data) || data.status in ['active', 'blocked']) &&
+             (!('role' in data) || data.role in ['system_admin', 'school_admin', 'teacher', 'quran_teacher', 'sports_coach', 'parent', 'child', 'authorized_person', 'visitor']) &&
+             (!('status' in data) || data.status in ['active', 'blocked', 'pending']) &&
              (!('createdAt' in data) || data.createdAt is timestamp) &&
              (!('displayName' in data) || (data.displayName is string && data.displayName.size() < 100)) &&
              (!('photoURL' in data) || (data.photoURL is string || data.photoURL == null)) &&
              (!('photoUrl' in data) || (data.photoUrl is string || data.photoUrl == null)) &&
-             (!('requestedRole' in data) || data.requestedRole in ['teacher', 'parent', 'child']) &&
-             (!('requestMessage' in data) || (data.requestMessage is string && data.requestMessage.size() < 1000)) &&
+             (!('requestedRole' in data) || data.requestedRole in ['teacher', 'quran_teacher', 'sports_coach', 'parent', 'child', 'school_admin', 'visitor'] || data.requestedRole == null) &&
+             (!('requestMessage' in data) || (data.requestMessage is string && data.requestMessage.size() < 1000) || data.requestMessage == null) &&
              (!('isDarkMode' in data) || data.isDarkMode is bool) &&
              (!('parentId' in data) || (data.parentId is string || data.parentId == null)) &&
              (!('childIds' in data) || data.childIds is list) &&
              (!('schoolId' in data) || (data.schoolId is string || data.schoolId == null)) &&
+             (!('authorizedBy' in data) || (data.authorizedBy is string || data.authorizedBy == null)) &&
+             (!('location' in data) || (data.location is map && data.location.lat is number && data.location.lng is number)) &&
              (!('updatedAt' in data) || data.updatedAt is timestamp);
     }
 
@@ -213,35 +223,23 @@ service cloud.firestore {
     // ===============================================================
 
     match /users/{userId} {
-      allow read: if isAuthenticated() && (
-        isOwner(userId) || 
-        isAdmin() || 
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'school_admin') ||
-        (resource != null && (
-          resource.data.role == 'system_admin' || 
-          resource.data.role == 'teacher' ||
-          (resource.data.role == 'parent' && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['teacher', 'school_admin', 'system_admin']) ||
-          (resource.data.role == 'child' && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (
-            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['teacher', 'school_admin', 'system_admin', 'parent'] ||
-            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.uid == resource.data.parentId
-          ))
-        ))
+      allow read: if isAuthenticated() && (request.auth.uid == userId || isPrimaryAdmin());
+      allow read: if isAdmin();
+      allow create: if isAuthenticated() && isOwner(userId) && (
+        isPrimaryAdmin() || 
+        (isValidUser(request.resource.data) && hasRequiredFields(['uid', 'email', 'status', 'createdAt']))
       );
-      allow create: if isAuthenticated() && isValidUser(request.resource.data) && 
-                    isOwner(userId) && 
-                    hasRequiredFields(['uid', 'email', 'status', 'createdAt']) &&
-                    (!('role' in request.resource.data) || 
-                     request.resource.data.role == 'visitor' ||
-                     (request.resource.data.role == 'system_admin' && (request.auth.token.email == "bsami0004bsami@gmail.com" || request.auth.token.email == "bsami04bsami@gmail.com")));
+      allow update: if isAuthenticated() && (isPrimaryAdmin() || isAdmin());
       allow update: if isAuthenticated() && (
-        isAdmin() || (
-          isOwner(userId) && 
-          isValidUser(request.resource.data) &&
-          (!('role' in request.resource.data) || request.resource.data.role == resource.data.role) &&
-          (!('uid' in request.resource.data) || request.resource.data.uid == resource.data.uid) &&
-          (!('email' in request.resource.data) || request.resource.data.email == resource.data.email) &&
-          (!('status' in request.resource.data) || request.resource.data.status == resource.data.status)
-        ) || (
+        isOwner(userId) && 
+        isValidUser(request.resource.data) &&
+        (!('role' in request.resource.data) || request.resource.data.role == resource.data.role) &&
+        (!('uid' in request.resource.data) || request.resource.data.uid == resource.data.uid) &&
+        (!('email' in request.resource.data) || request.resource.data.email == resource.data.email) &&
+        (!('status' in request.resource.data) || request.resource.data.status == resource.data.status)
+      );
+      allow update: if isAuthenticated() && (
+        (
           // School Admin updating users in their school or claiming a visitor
           exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'school_admin' &&
@@ -371,6 +369,36 @@ service cloud.firestore {
                     isValidHomeworkSubmission(request.resource.data) &&
                     get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'child' &&
                     request.resource.data.childUid == request.auth.uid;
+    }
+
+    function isValidFeedback(data) {
+      return hasOnlyAllowedFields(['fromUid', 'fromName', 'toUid', 'toName', 'rating', 'comment', 'createdAt']) &&
+             data.fromUid == request.auth.uid &&
+             data.toUid is string &&
+             data.rating is number && data.rating >= 1 && data.rating <= 5 &&
+             data.comment is string && data.comment.size() < 2000 &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidCall(data) {
+      return hasOnlyAllowedFields(['callerId', 'callerName', 'receiverId', 'channel', 'status', 'createdAt']) &&
+             data.callerId is string &&
+             data.receiverId is string &&
+             data.channel is string &&
+             data.status in ['pending', 'accepted', 'rejected', 'ended'] &&
+             data.createdAt is timestamp;
+    }
+
+    match /feedbacks/{feedbackId} {
+      allow read: if isAdmin();
+      allow create: if isAuthenticated() && isValidFeedback(request.resource.data);
+    }
+
+    match /calls/{callId} {
+      allow read: if isAuthenticated() && (request.auth.uid == resource.data.callerId || request.auth.uid == resource.data.receiverId || isAdmin());
+      allow create: if isAuthenticated() && isValidCall(request.resource.data) && request.resource.data.callerId == request.auth.uid;
+      allow update: if isAuthenticated() && (request.auth.uid == resource.data.callerId || request.auth.uid == resource.data.receiverId || isAdmin()) && isValidCall(request.resource.data);
+      allow delete: if isAdmin();
     }
 
     match /visitor_messages/{messageId} {

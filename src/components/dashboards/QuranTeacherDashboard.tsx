@@ -2,9 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { collection, query, where, onSnapshot, addDoc, serverTimestamp, getDocs, doc, getDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useAuth } from '../../context/AuthContext';
-import { Student } from '../../types';
+import { Student, Announcement } from '../../types';
 import { motion, AnimatePresence } from 'motion/react';
-import { Book, MessageSquare, Calendar, Users, X, CheckCircle2, Star, Clock, BookOpen } from 'lucide-react';
+import { Book, MessageSquare, Calendar, Users, X, CheckCircle2, Star, Clock, BookOpen, Megaphone } from 'lucide-react';
 import { handleFirestoreError, OperationType } from '../../lib/firestore-errors';
 import { Chat } from '../Chat';
 
@@ -17,6 +17,18 @@ export const QuranTeacherDashboard: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [parents, setParents] = useState<{ uid: string, name: string, studentName: string }[]>([]);
   const [selectedParent, setSelectedParent] = useState<{ uid: string, name: string } | null>(null);
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+
+  useEffect(() => {
+    if (!profile?.schoolId) return;
+    const q = query(collection(db, 'announcements'), where('schoolId', '==', profile.schoolId));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setAnnouncements(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Announcement)));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'announcements', user || undefined);
+    });
+    return () => unsubscribe();
+  }, [profile?.schoolId]);
 
   useEffect(() => {
     if (!profile?.schoolId) return;
@@ -93,7 +105,18 @@ export const QuranTeacherDashboard: React.FC = () => {
         </div>
       </header>
 
-      <div className="flex gap-6 border-b border-slate-100 dark:border-slate-800">
+      {announcements.length > 0 && (
+        <div className="bg-emerald-600 text-white p-6 rounded-[2.5rem] shadow-xl shadow-emerald-100 dark:shadow-none mb-8">
+          <div className="flex items-center gap-2 mb-3">
+            <Megaphone className="w-5 h-5" />
+            <span className="text-xs font-black uppercase tracking-widest">School Announcement</span>
+          </div>
+          <h3 className="text-lg font-black mb-1">{announcements[0].title}</h3>
+          <p className="text-emerald-100 text-sm">{announcements[0].content}</p>
+        </div>
+      )}
+
+      <div className="flex gap-6 border-b border-slate-100 dark:border-slate-800 overflow-x-auto whitespace-nowrap pb-px scrollbar-hide">
         {[
           { id: 'classes', icon: BookOpen, label: 'My Classes' },
           { id: 'students', icon: Users, label: 'Students' },
@@ -103,7 +126,7 @@ export const QuranTeacherDashboard: React.FC = () => {
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id as any)}
-            className={`pb-4 px-2 text-sm font-bold transition-all relative flex items-center gap-2 ${
+            className={`pb-4 px-2 text-sm font-bold transition-all relative flex items-center gap-2 shrink-0 ${
               activeTab === tab.id ? 'text-emerald-600' : 'text-slate-400'
             }`}
           >

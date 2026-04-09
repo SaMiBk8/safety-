@@ -4,8 +4,10 @@ import { db } from '../../lib/firebase';
 import { useAuth } from '../../context/AuthContext';
 import { Announcement, UserProfile } from '../../types';
 import { motion, AnimatePresence } from 'motion/react';
-import { Plus, Megaphone, Users, Calendar, CheckCircle2, X, Clock, FileText, MessageSquare } from 'lucide-react';
+import { Plus, Megaphone, Users, Calendar, CheckCircle2, X, Clock, FileText, MessageSquare, GraduationCap } from 'lucide-react';
 import { Chat } from '../Chat';
+import { ContactList } from '../ContactList';
+import { FeedbackModal } from '../FeedbackModal';
 import { handleFirestoreError, OperationType } from '../../lib/firestore-errors';
 
 interface VisitorMessage {
@@ -24,10 +26,12 @@ interface VisitorMessage {
 
 export const SchoolAdminDashboard: React.FC = () => {
   const { user, profile } = useAuth();
-  const [activeTab, setActiveTab] = useState<'announcements' | 'staff' | 'requests' | 'messenger'>('announcements');
+  const [activeTab, setActiveTab] = useState<'announcements' | 'staff' | 'students' | 'requests' | 'messenger' | 'feedback'>('announcements');
+  const [selectedContactForFeedback, setSelectedContactForFeedback] = useState<{ uid: string, name: string } | null>(null);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [staff, setStaff] = useState<UserProfile[]>([]);
   const [parents, setParents] = useState<UserProfile[]>([]);
+  const [students, setStudents] = useState<any[]>([]);
   const [requests, setRequests] = useState<VisitorMessage[]>([]);
   const [selectedContact, setSelectedContact] = useState<UserProfile | null>(null);
   const [newTitle, setNewTitle] = useState('');
@@ -84,11 +88,22 @@ export const SchoolAdminDashboard: React.FC = () => {
       handleFirestoreError(error, OperationType.LIST, 'users', user || undefined);
     });
 
+    const studentsQ = query(
+      collection(db, 'students'),
+      where('schoolId', '==', profile.schoolId)
+    );
+    const unsubscribeStudents = onSnapshot(studentsQ, (snapshot) => {
+      setStudents(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'students', user || undefined);
+    });
+
     return () => {
       unsubscribeAnn();
       unsubscribeStaff();
       unsubscribeRequests();
       unsubscribeParents();
+      unsubscribeStudents();
     };
   }, [profile?.schoolId]);
 
@@ -101,6 +116,26 @@ export const SchoolAdminDashboard: React.FC = () => {
         status: 'active',
         updatedAt: serverTimestamp()
       });
+
+      // If it's a child, create a student record if it doesn't exist
+      if (request.requestedRole === 'child') {
+        const studentsRef = collection(db, 'students');
+        const q = query(studentsRef, where('childUid', '==', request.uid));
+        const snap = await getDocs(q);
+        
+        if (snap.empty) {
+          await addDoc(collection(db, 'students'), {
+            childUid: request.uid,
+            schoolId: profile.schoolId,
+            name: request.displayName || 'Student',
+            grade: 'Not Assigned',
+            parentUid: '',
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          });
+        }
+      }
+
       await updateDoc(doc(db, 'visitor_messages', request.id), {
         status: 'read'
       });
@@ -116,6 +151,17 @@ export const SchoolAdminDashboard: React.FC = () => {
       });
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `visitor_messages/${requestId}`, user || undefined);
+    }
+  };
+
+  const handleAssignTeacher = async (studentId: string, teacherId: string) => {
+    try {
+      await updateDoc(doc(db, 'students', studentId), {
+        teacherId: teacherId,
+        updatedAt: serverTimestamp()
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `students/${studentId}`, user || undefined);
     }
   };
 
@@ -199,10 +245,10 @@ export const SchoolAdminDashboard: React.FC = () => {
         </div>
       </header>
 
-      <div className="flex gap-6 border-b border-slate-100 dark:border-slate-800 mb-8">
+      <div className="flex gap-6 border-b border-slate-100 dark:border-slate-800 mb-8 overflow-x-auto whitespace-nowrap pb-px scrollbar-hide">
         <button 
           onClick={() => setActiveTab('announcements')}
-          className={`pb-4 px-2 text-sm font-bold transition-all relative ${
+          className={`pb-4 px-2 text-sm font-bold transition-all relative shrink-0 ${
             activeTab === 'announcements' ? 'text-blue-600' : 'text-slate-400'
           }`}
         >
@@ -211,16 +257,25 @@ export const SchoolAdminDashboard: React.FC = () => {
         </button>
         <button 
           onClick={() => setActiveTab('staff')}
-          className={`pb-4 px-2 text-sm font-bold transition-all relative ${
+          className={`pb-4 px-2 text-sm font-bold transition-all relative shrink-0 ${
             activeTab === 'staff' ? 'text-blue-600' : 'text-slate-400'
           }`}
         >
-          Staff Management
+          Directory
           {activeTab === 'staff' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
         </button>
         <button 
+          onClick={() => setActiveTab('students')}
+          className={`pb-4 px-2 text-sm font-bold transition-all relative shrink-0 ${
+            activeTab === 'students' ? 'text-blue-600' : 'text-slate-400'
+          }`}
+        >
+          Students
+          {activeTab === 'students' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
+        </button>
+        <button 
           onClick={() => setActiveTab('requests')}
-          className={`pb-4 px-2 text-sm font-bold transition-all relative flex items-center gap-2 ${
+          className={`pb-4 px-2 text-sm font-bold transition-all relative flex items-center gap-2 shrink-0 ${
             activeTab === 'requests' ? 'text-blue-600' : 'text-slate-400'
           }`}
         >
@@ -232,7 +287,7 @@ export const SchoolAdminDashboard: React.FC = () => {
         </button>
         <button 
           onClick={() => setActiveTab('messenger')}
-          className={`pb-4 px-2 text-sm font-bold transition-all relative ${
+          className={`pb-4 px-2 text-sm font-bold transition-all relative shrink-0 ${
             activeTab === 'messenger' ? 'text-blue-600' : 'text-slate-400'
           }`}
         >
@@ -329,11 +384,11 @@ export const SchoolAdminDashboard: React.FC = () => {
         </div>
       </div>
       ) : activeTab === 'staff' ? (
-        <div className="space-y-6">
+        <div className="space-y-8">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-slate-900 dark:text-white font-bold">
-              <Users className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-              School Staff
+            <div className="flex items-center gap-2 text-slate-900 dark:text-white font-bold text-xl">
+              <Users className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+              School Directory
             </div>
             <button 
               onClick={() => setIsAddingTeacher(true)}
@@ -401,88 +456,163 @@ export const SchoolAdminDashboard: React.FC = () => {
             )}
           </AnimatePresence>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {staff.map((member) => (
-              <div key={member.uid} className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm">
-                <div className="flex items-center gap-4 mb-4">
-                  <div className="w-12 h-12 bg-blue-50 dark:bg-blue-900/30 rounded-2xl flex items-center justify-center text-blue-600 font-black text-xl">
-                    {member.displayName?.[0] || 'S'}
+          <div className="space-y-6">
+            <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest px-2">Staff Members</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {staff.map((member) => (
+                <div key={member.uid} className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm">
+                  <div className="flex items-center gap-4 mb-4">
+                    <div className="w-12 h-12 bg-blue-50 dark:bg-blue-900/30 rounded-2xl flex items-center justify-center text-blue-600 font-black text-xl">
+                      {member.displayName?.[0] || 'S'}
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-slate-900 dark:text-white">{member.displayName || 'Unnamed Staff'}</h4>
+                      <p className="text-xs text-slate-500">{member.email}</p>
+                      <span className="text-[10px] font-black uppercase text-blue-600 bg-blue-50 dark:bg-blue-900/20 px-2 py-0.5 rounded-full mt-1 inline-block">
+                        {member.role?.replace('_', ' ')}
+                      </span>
+                    </div>
                   </div>
-                  <div>
-                    <h4 className="font-bold text-slate-900 dark:text-white">{member.displayName || 'Unnamed Staff'}</h4>
-                    <p className="text-xs text-slate-500">{member.email}</p>
-                    <span className="text-[10px] font-black uppercase text-blue-600 bg-blue-50 dark:bg-blue-900/20 px-2 py-0.5 rounded-full mt-1 inline-block">
-                      {member.role?.replace('_', ' ')}
+                  <div className="flex justify-between items-center pt-4 border-t border-slate-50 dark:border-slate-800">
+                    <span className={`text-xs font-bold uppercase ${member.status === 'active' ? 'text-emerald-500' : 'text-amber-500'}`}>
+                      {member.status}
                     </span>
-                  </div>
-                </div>
-                <div className="flex justify-between items-center pt-4 border-t border-slate-50 dark:border-slate-800">
-                  <span className={`text-xs font-bold uppercase ${member.status === 'active' ? 'text-emerald-500' : 'text-amber-500'}`}>
-                    {member.status}
-                  </span>
-                  <div className="flex gap-2">
-                    {member.status === 'pending' && (
-                      <button 
-                        onClick={() => handleApproveRequest({ uid: member.uid, id: '', email: member.email, displayName: member.displayName || '', requestedRole: member.role || 'teacher', message: '', createdAt: null, status: 'unread' })}
-                        className="text-xs font-bold text-emerald-600 hover:underline"
-                      >
-                        Activate
-                      </button>
-                    )}
                     <button className="text-xs font-bold text-blue-600 hover:underline">View Profile</button>
                   </div>
                 </div>
-              </div>
-            ))}
-            {staff.length === 0 && !isAddingTeacher && (
-              <div className="col-span-full text-center py-20 text-slate-400 italic">No staff members registered yet.</div>
-            )}
+              ))}
+              {staff.length === 0 && (
+                <div className="col-span-full text-center py-12 text-slate-400 italic">No staff members registered yet.</div>
+              )}
+            </div>
+
+            <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest px-2 pt-4">Parents & Children</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {parents.map((parent) => (
+                <div key={parent.uid} className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm">
+                  <div className="flex items-center gap-4 mb-4">
+                    <div className="w-12 h-12 bg-purple-50 dark:bg-purple-900/30 rounded-2xl flex items-center justify-center text-purple-600 font-black text-xl">
+                      {parent.displayName?.[0] || 'P'}
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-slate-900 dark:text-white">{parent.displayName || 'Parent'}</h4>
+                      <p className="text-xs text-slate-500">{parent.email}</p>
+                    </div>
+                  </div>
+                  <div className="space-y-2 pt-4 border-t border-slate-50 dark:border-slate-800">
+                    <div className="text-[10px] font-black text-slate-400 uppercase">Linked Children</div>
+                    <div className="flex flex-wrap gap-2">
+                      {parent.childIds && parent.childIds.length > 0 ? (
+                        parent.childIds.map((childId, idx) => (
+                          <span key={idx} className="px-2 py-1 bg-slate-50 dark:bg-slate-800 rounded-lg text-[10px] text-slate-600 dark:text-slate-400 border border-slate-100 dark:border-slate-700">
+                            ID: {childId.slice(-6)}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="text-[10px] text-slate-400 italic">No children linked yet</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {parents.length === 0 && (
+                <div className="col-span-full text-center py-12 text-slate-400 italic">No parents registered yet.</div>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : activeTab === 'students' ? (
+        <div className="space-y-6">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-slate-900 dark:text-white font-bold text-xl">
+              <GraduationCap className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+              Student Management
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm overflow-hidden">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-slate-50 dark:bg-slate-800/50">
+                  <th className="p-4 text-xs font-black text-slate-400 uppercase tracking-widest">Student Name</th>
+                  <th className="p-4 text-xs font-black text-slate-400 uppercase tracking-widest">Grade</th>
+                  <th className="p-4 text-xs font-black text-slate-400 uppercase tracking-widest">Assigned Teacher</th>
+                  <th className="p-4 text-xs font-black text-slate-400 uppercase tracking-widest">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
+                {students.map((student) => (
+                  <tr key={student.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition-colors">
+                    <td className="p-4">
+                      <div className="font-bold text-slate-900 dark:text-white">{student.name}</div>
+                      <div className="text-[10px] text-slate-400">ID: {student.id.slice(-6)}</div>
+                    </td>
+                    <td className="p-4">
+                      <span className="px-2 py-1 bg-slate-100 dark:bg-slate-800 rounded-lg text-xs font-bold text-slate-600 dark:text-slate-400">
+                        {student.grade}
+                      </span>
+                    </td>
+                    <td className="p-4">
+                      <select 
+                        className="bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 dark:text-white w-full max-w-[200px]"
+                        value={student.teacherId || ''}
+                        onChange={(e) => handleAssignTeacher(student.id, e.target.value)}
+                      >
+                        <option value="">Unassigned</option>
+                        {staff.filter(s => s.role === 'teacher').map(teacher => (
+                          <option key={teacher.uid} value={teacher.uid}>
+                            {teacher.displayName || teacher.email}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="p-4">
+                      <button className="text-xs font-bold text-blue-600 hover:underline">View Details</button>
+                    </td>
+                  </tr>
+                ))}
+                {students.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="p-8 text-center text-slate-400 italic">
+                      No students found in this school.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
       ) : activeTab === 'messenger' ? (
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
           <div className="lg:col-span-1 space-y-4">
-            <div className="bg-white dark:bg-slate-900 p-4 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm">
-              <h3 className="text-xs font-bold text-slate-400 uppercase mb-4 px-2">Staff</h3>
-              <div className="space-y-1">
-                {staff.map(t => (
-                  <button
-                    key={t.uid}
-                    onClick={() => setSelectedContact(t)}
-                    className={`w-full text-left p-3 rounded-xl text-sm transition-all ${
-                      selectedContact?.uid === t.uid 
-                        ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 font-bold' 
-                        : 'hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400'
-                    }`}
-                  >
-                    {t.displayName || t.email}
-                  </button>
-                ))}
+            <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm overflow-hidden h-[600px] flex flex-col">
+              <div className="flex-1 overflow-hidden">
+                <ContactList 
+                  onSelect={(c) => setSelectedContact({ uid: c.uid, displayName: c.displayName } as any)} 
+                  selectedId={selectedContact?.uid} 
+                />
               </div>
-
-              <h3 className="text-xs font-bold text-slate-400 uppercase mt-6 mb-4 px-2">Parents</h3>
-              <div className="space-y-1">
-                {parents.map(p => (
-                  <button
-                    key={p.uid}
-                    onClick={() => setSelectedContact(p)}
-                    className={`w-full text-left p-3 rounded-xl text-sm transition-all ${
-                      selectedContact?.uid === p.uid 
-                        ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 font-bold' 
-                        : 'hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400'
-                    }`}
-                  >
-                    {p.displayName || p.email}
-                  </button>
-                ))}
+              <div className="p-4 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  onClick={() => {
+                    if (selectedContact) {
+                      setSelectedContactForFeedback({ uid: selectedContact.uid, name: selectedContact.displayName || '' });
+                      setActiveTab('feedback');
+                    }
+                  }}
+                  disabled={!selectedContact}
+                  className="w-full py-3 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-xl text-xs font-bold hover:bg-slate-200 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  <MessageSquare className="w-4 h-4" />
+                  Give Feedback
+                </button>
               </div>
             </div>
           </div>
-
           <div className="lg:col-span-3">
-            <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm overflow-hidden min-h-[500px]">
+            <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm overflow-hidden min-h-[600px] flex flex-col">
               {selectedContact ? (
-                <div className="flex flex-col h-full">
+                <div className="flex flex-col h-full flex-1">
                   <div className="p-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/50">
                     <h4 className="font-bold text-slate-900 dark:text-white">{selectedContact.displayName}</h4>
                     <p className="text-[10px] text-slate-400 uppercase font-black">{selectedContact.role}</p>
@@ -492,7 +622,7 @@ export const SchoolAdminDashboard: React.FC = () => {
                   </div>
                 </div>
               ) : (
-                <div className="flex flex-col items-center justify-center h-full p-12 text-center">
+                <div className="flex flex-col items-center justify-center h-full p-12 text-center flex-1">
                   <div className="w-16 h-16 bg-slate-50 dark:bg-slate-800 rounded-full flex items-center justify-center mb-4">
                     <MessageSquare className="w-8 h-8 text-slate-300" />
                   </div>
@@ -568,6 +698,12 @@ export const SchoolAdminDashboard: React.FC = () => {
           )}
         </div>
       ) : null}
+      <FeedbackModal 
+        isOpen={activeTab === 'feedback'}
+        onClose={() => setActiveTab('messenger')}
+        toUid={selectedContactForFeedback?.uid || ''}
+        toName={selectedContactForFeedback?.name || ''}
+      />
     </div>
   );
 };

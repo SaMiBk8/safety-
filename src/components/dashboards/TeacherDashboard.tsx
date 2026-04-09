@@ -2,25 +2,41 @@ import React, { useEffect, useState } from 'react';
 import { collection, query, where, onSnapshot, addDoc, serverTimestamp, updateDoc, doc, getDoc, orderBy } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useAuth } from '../../context/AuthContext';
-import { Student } from '../../types';
+import { Student, Announcement } from '../../types';
 import { motion, AnimatePresence } from 'motion/react';
-import { Users, ClipboardCheck, GraduationCap, AlertTriangle, MessageSquare, X, CheckCircle2, AlertCircle, BookOpen, FileText, Clock } from 'lucide-react';
+import { Users, ClipboardCheck, GraduationCap, AlertTriangle, MessageSquare, X, CheckCircle2, AlertCircle, BookOpen, FileText, Clock, Megaphone, Calendar } from 'lucide-react';
 import { handleFirestoreError, OperationType } from '../../lib/firestore-errors';
 import { Chat } from '../Chat';
+import { ContactList } from '../ContactList';
+import { FeedbackModal } from '../FeedbackModal';
 
 export const TeacherDashboard: React.FC = () => {
   const { user, profile } = useAuth();
   const [students, setStudents] = useState<Student[]>([]);
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
   const [note, setNote] = useState('');
-  const [activeTab, setActiveTab] = useState<'students' | 'messenger' | 'submissions'>('students');
+  const [activeTab, setActiveTab] = useState<'students' | 'messenger' | 'submissions' | 'feedback'>('students');
+  const [selectedContactForFeedback, setSelectedContactForFeedback] = useState<{ uid: string, name: string } | null>(null);
   const [modalType, setModalType] = useState<'attendance' | 'grades' | null>(null);
   const [modalStudent, setModalStudent] = useState<Student | null>(null);
   const [gradeValue, setGradeValue] = useState('');
   const [attendanceStatus, setAttendanceStatus] = useState<'present' | 'absent' | null>(null);
   const [parents, setParents] = useState<{ uid: string, name: string, studentName: string }[]>([]);
   const [selectedParent, setSelectedParent] = useState<{ uid: string, name: string } | null>(null);
+  const [selectedContact, setSelectedContact] = useState<{ uid: string, displayName: string } | null>(null);
   const [submissions, setSubmissions] = useState<any[]>([]);
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+
+  useEffect(() => {
+    if (!profile?.schoolId) return;
+    const q = query(collection(db, 'announcements'), where('schoolId', '==', profile.schoolId));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setAnnouncements(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Announcement)));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'announcements', user || undefined);
+    });
+    return () => unsubscribe();
+  }, [profile?.schoolId]);
 
   useEffect(() => {
     const fetchParents = async () => {
@@ -106,7 +122,7 @@ export const TeacherDashboard: React.FC = () => {
         status: attendanceStatus,
         date: serverTimestamp(),
       });
-      setActiveModal(null);
+      setModalType(null);
       setAttendanceStatus(null);
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'attendance', user || undefined);
@@ -122,7 +138,7 @@ export const TeacherDashboard: React.FC = () => {
         grade: gradeValue,
         createdAt: serverTimestamp(),
       });
-      setActiveModal(null);
+      setModalType(null);
       setGradeValue('');
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'grades', user || undefined);
@@ -141,10 +157,10 @@ export const TeacherDashboard: React.FC = () => {
         </div>
       </header>
 
-      <div className="flex gap-6 border-b border-slate-100 dark:border-slate-800 mb-8">
+      <div className="flex gap-6 border-b border-slate-100 dark:border-slate-800 mb-8 overflow-x-auto whitespace-nowrap pb-px scrollbar-hide">
         <button 
           onClick={() => setActiveTab('students')}
-          className={`pb-4 px-2 text-sm font-bold transition-all relative ${
+          className={`pb-4 px-2 text-sm font-bold transition-all relative shrink-0 ${
             activeTab === 'students' ? 'text-blue-600' : 'text-slate-400'
           }`}
         >
@@ -153,7 +169,7 @@ export const TeacherDashboard: React.FC = () => {
         </button>
         <button 
           onClick={() => setActiveTab('messenger')}
-          className={`pb-4 px-2 text-sm font-bold transition-all relative ${
+          className={`pb-4 px-2 text-sm font-bold transition-all relative shrink-0 ${
             activeTab === 'messenger' ? 'text-blue-600' : 'text-slate-400'
           }`}
         >
@@ -162,18 +178,43 @@ export const TeacherDashboard: React.FC = () => {
         </button>
         <button 
           onClick={() => setActiveTab('submissions')}
-          className={`pb-4 px-2 text-sm font-bold transition-all relative ${
+          className={`pb-4 px-2 text-sm font-bold transition-all relative shrink-0 ${
             activeTab === 'submissions' ? 'text-blue-600' : 'text-slate-400'
           }`}
         >
           Submissions
           {activeTab === 'submissions' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
         </button>
+        <button 
+          onClick={() => setActiveTab('announcements' as any)}
+          className={`pb-4 px-2 text-sm font-bold transition-all relative shrink-0 ${
+            activeTab === ('announcements' as any) ? 'text-blue-600' : 'text-slate-400'
+          }`}
+        >
+          Announcements
+          {activeTab === ('announcements' as any) && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
+        </button>
       </div>
 
       {activeTab === 'students' ? (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2 space-y-6">
+            {announcements.length > 0 && (
+              <div className="bg-blue-600 text-white p-6 rounded-[2rem] shadow-xl shadow-blue-100 dark:shadow-none mb-4">
+                <div className="flex items-center gap-2 mb-4">
+                  <Megaphone className="w-5 h-5" />
+                  <h3 className="font-bold">Latest Announcement</h3>
+                </div>
+                <h4 className="text-lg font-black mb-2">{announcements[0].title}</h4>
+                <p className="text-blue-100 text-sm line-clamp-2">{announcements[0].content}</p>
+                <button 
+                  onClick={() => setActiveTab('announcements' as any)}
+                  className="mt-4 text-xs font-bold underline"
+                >
+                  View All Announcements
+                </button>
+              </div>
+            )}
             <div className="flex items-center gap-2 text-slate-900 dark:text-white font-bold">
               <Users className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
               My Students ({students.length})
@@ -318,47 +359,49 @@ export const TeacherDashboard: React.FC = () => {
       ) : activeTab === 'messenger' ? (
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
           <div className="lg:col-span-1 space-y-4">
-            <div className="bg-white dark:bg-slate-900 p-4 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm">
-              <h3 className="text-xs font-bold text-slate-400 uppercase mb-4 px-2">Parents</h3>
-              <div className="space-y-1">
-                {parents.map(p => (
-                  <button
-                    key={p.uid}
-                    onClick={() => setSelectedParent(p)}
-                    className={`w-full text-left p-3 rounded-xl text-sm transition-all ${
-                      selectedParent?.uid === p.uid 
-                        ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 font-bold' 
-                        : 'hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400'
-                    }`}
-                  >
-                    {p.name} ({p.studentName})
-                  </button>
-                ))}
-                {parents.length === 0 && (
-                  <p className="text-xs text-slate-400 italic p-2">No parents found for your students.</p>
-                )}
+            <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm overflow-hidden h-[600px] flex flex-col">
+              <div className="flex-1 overflow-hidden">
+                <ContactList 
+                  onSelect={(c) => setSelectedContact({ uid: c.uid, displayName: c.displayName })} 
+                  selectedId={selectedContact?.uid} 
+                />
+              </div>
+              <div className="p-4 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  onClick={() => {
+                    if (selectedContact) {
+                      setSelectedContactForFeedback({ uid: selectedContact.uid, name: selectedContact.displayName });
+                      setActiveTab('feedback');
+                    }
+                  }}
+                  disabled={!selectedContact}
+                  className="w-full py-3 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-xl text-xs font-bold hover:bg-slate-200 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  <MessageSquare className="w-4 h-4" />
+                  Give Feedback
+                </button>
               </div>
             </div>
           </div>
           <div className="lg:col-span-3">
-            <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm overflow-hidden min-h-[500px]">
-              {selectedParent ? (
-                <div className="flex flex-col h-full">
+            <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm overflow-hidden min-h-[600px] flex flex-col">
+              {selectedContact ? (
+                <div className="flex flex-col h-full flex-1">
                   <div className="p-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/50">
-                    <h4 className="font-bold text-slate-900 dark:text-white">{selectedParent.name}</h4>
-                    <p className="text-[10px] text-slate-400 uppercase font-black">Parent</p>
+                    <h4 className="font-bold text-slate-900 dark:text-white">{selectedContact.displayName}</h4>
+                    <p className="text-[10px] text-slate-400 uppercase font-black">Active Chat</p>
                   </div>
                   <div className="flex-1">
-                    <Chat receiverId={selectedParent.uid} receiverName={selectedParent.name} />
+                    <Chat receiverId={selectedContact.uid} receiverName={selectedContact.displayName} />
                   </div>
                 </div>
               ) : (
-                <div className="flex flex-col items-center justify-center h-full p-12 text-center">
+                <div className="flex flex-col items-center justify-center h-full p-12 text-center flex-1">
                   <div className="w-16 h-16 bg-slate-50 dark:bg-slate-800 rounded-full flex items-center justify-center mb-4">
                     <MessageSquare className="w-8 h-8 text-slate-300" />
                   </div>
                   <h4 className="font-bold text-slate-900 dark:text-white mb-2">Messenger</h4>
-                  <p className="text-sm text-slate-500 max-w-xs">Select a parent from the list to start a conversation.</p>
+                  <p className="text-sm text-slate-500 max-w-xs">Select a contact from the list to start a conversation.</p>
                 </div>
               )}
             </div>
@@ -390,6 +433,28 @@ export const TeacherDashboard: React.FC = () => {
               ))}
             </tbody>
           </table>
+        </div>
+      ) : activeTab === ('announcements' as any) ? (
+        <div className="space-y-6">
+          <div className="flex items-center gap-2 text-slate-900 dark:text-white font-bold text-xl">
+            <Megaphone className="w-6 h-6 text-blue-600" />
+            School Announcements
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {announcements.map((ann) => (
+              <div key={ann.id} className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm">
+                <h3 className="font-bold text-slate-900 dark:text-white mb-2">{ann.title}</h3>
+                <p className="text-slate-600 dark:text-slate-400 text-sm leading-relaxed mb-4">{ann.content}</p>
+                <div className="flex items-center gap-2 text-xs text-slate-400">
+                  <Calendar className="w-3 h-3" />
+                  {ann.createdAt?.toDate().toLocaleDateString()}
+                </div>
+              </div>
+            ))}
+            {announcements.length === 0 && (
+              <div className="col-span-full text-center py-20 text-slate-400 italic">No announcements from school administration.</div>
+            )}
+          </div>
         </div>
       ) : null}
 
@@ -474,6 +539,12 @@ export const TeacherDashboard: React.FC = () => {
           </div>
         )}
       </AnimatePresence>
+      <FeedbackModal 
+        isOpen={activeTab === 'feedback'}
+        onClose={() => setActiveTab('messenger')}
+        toUid={selectedContactForFeedback?.uid || ''}
+        toName={selectedContactForFeedback?.name || ''}
+      />
     </div>
   );
 };

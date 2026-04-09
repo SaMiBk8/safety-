@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { collection, query, where, onSnapshot, doc, updateDoc, getDoc, getDocs, arrayUnion, serverTimestamp } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, updateDoc, getDoc, getDocs, arrayUnion, serverTimestamp, addDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useAuth } from '../../context/AuthContext';
-import { Student, Announcement, SOSAlert } from '../../types';
+import { Student, Announcement, SOSAlert, UserProfile } from '../../types';
 import { GoogleMap, useJsApiLoader, Marker } from '@react-google-maps/api';
 import { motion, AnimatePresence } from 'motion/react';
 import { MapPin, Bell, Phone, ShieldAlert, BookOpen, Calendar, X, MessageSquare, Plus } from 'lucide-react';
@@ -11,49 +11,35 @@ import { handleFirestoreError, OperationType } from '../../lib/firestore-errors'
 const mapContainerStyle = { width: '100%', height: '300px' };
 
 import { Chat } from '../Chat';
+import { ContactList } from '../ContactList';
+import { FeedbackModal } from '../FeedbackModal';
 
-export const ParentDashboard: React.FC<{ onStartCall?: (channel: string) => void }> = ({ onStartCall }) => {
+export const ParentDashboard: React.FC<{ onStartCall?: (channel: string, receiverId: string, receiverName: string) => void }> = ({ onStartCall }) => {
   const { user, profile } = useAuth();
   const [children, setChildren] = useState<Student[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [activeAlerts, setActiveAlerts] = useState<SOSAlert[]>([]);
-  const [activeModal, setActiveModal] = useState<'messenger' | null>(null);
+  const [activeModal, setActiveModal] = useState<'messenger' | 'feedback' | null>(null);
+  const [selectedChildForFeedback, setSelectedChildForFeedback] = useState<{ uid: string, name: string } | null>(null);
+  const [mapCenters, setMapCenters] = useState<Record<string, { lat: number, lng: number }>>({});
   const [isAddingChild, setIsAddingChild] = useState(false);
   const [childEmail, setChildEmail] = useState('');
   const [addChildStatus, setAddChildStatus] = useState<{ type: 'success' | 'error', message: string } | null>(null);
-  const [teachers, setTeachers] = useState<{ uid: string, name: string, schoolName?: string }[]>([]);
-  const [selectedTeacher, setSelectedTeacher] = useState<{ uid: string, name: string } | null>(null);
+  const [selectedContact, setSelectedContact] = useState<{ uid: string, displayName: string } | null>(null);
+
+  const [lastKnownLocations, setLastKnownLocations] = useState<Record<string, { lat: number, lng: number }>>({});
 
   useEffect(() => {
-    const fetchTeachers = async () => {
-      if (children.length === 0) return;
-      
-      const teacherIds = Array.from(new Set(children.map(c => c.teacherId).filter(Boolean))) as string[];
-      if (teacherIds.length === 0) return;
-
-      try {
-        const teacherDocs = await Promise.all(
-          teacherIds.map(id => getDoc(doc(db, 'users', id)))
-        );
-        
-        const teacherList = teacherDocs
-          .filter(d => d.exists())
-          .map(d => ({
-            uid: d.id,
-            name: d.data()?.displayName || 'Teacher'
-          }));
-        
-        setTeachers(teacherList);
-        if (teacherList.length > 0 && !selectedTeacher) {
-          setSelectedTeacher(teacherList[0]);
+    children.forEach(child => {
+      if (child.location) {
+        setLastKnownLocations(prev => ({ ...prev, [child.id]: child.location }));
+        if (!mapCenters[child.id]) {
+          setMapCenters(prev => ({ ...prev, [child.id]: child.location }));
         }
-      } catch (error) {
-        handleFirestoreError(error, OperationType.GET, 'users', user || undefined);
       }
-    };
-    fetchTeachers();
+    });
   }, [children]);
-  
+
   const { isLoaded } = useJsApiLoader({
     id: 'google-map-script',
     googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || ""
@@ -62,13 +48,35 @@ export const ParentDashboard: React.FC<{ onStartCall?: (channel: string) => void
   // Listen for children
   useEffect(() => {
     if (!profile?.uid) return;
+
+    // Parent GPS Tracking
+    let watchId: number;
+    if ("geolocation" in navigator) {
+      watchId = navigator.geolocation.watchPosition(
+        (position) => {
+          updateDoc(doc(db, 'users', profile.uid), {
+            location: {
+              lat: position.coords.latitude,
+              lng: position.coords.longitude,
+              lastUpdated: serverTimestamp()
+            }
+          }).catch(err => console.error("Parent GPS Update Error:", err));
+        },
+        (error) => console.error("Parent GPS Error:", error),
+        { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+      );
+    }
+
     const q = query(collection(db, 'students'), where('parentUid', '==', profile.uid));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       setChildren(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Student)));
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'students', user || undefined);
     });
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+      if (watchId) navigator.geolocation.clearWatch(watchId);
+    };
   }, [profile?.uid]);
 
   // Listen for SOS Alerts
@@ -126,7 +134,7 @@ export const ParentDashboard: React.FC<{ onStartCall?: (channel: string) => void
       }
 
       const childDoc = querySnapshot.docs[0];
-      const childData = childDoc.data();
+      const childData = childDoc.data() as UserProfile;
 
       // Check if already linked
       const studentsRef = collection(db, 'students');
@@ -134,17 +142,24 @@ export const ParentDashboard: React.FC<{ onStartCall?: (channel: string) => void
       const studentSnapshot = await getDocs(studentQ);
 
       if (studentSnapshot.empty) {
-        setAddChildStatus({ type: 'error', message: 'Student record not found for this user.' });
-        return;
+        // Create student record if it doesn't exist
+        await addDoc(collection(db, 'students'), {
+          childUid: childDoc.id,
+          parentUid: profile.uid,
+          schoolId: childData.schoolId || '',
+          name: childData.displayName || 'Student',
+          grade: 'Not Assigned',
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        });
+      } else {
+        // Update existing student record
+        const studentDoc = studentSnapshot.docs[0];
+        await updateDoc(doc(db, 'students', studentDoc.id), {
+          parentUid: profile.uid,
+          updatedAt: serverTimestamp()
+        });
       }
-
-      const studentDoc = studentSnapshot.docs[0];
-      
-      // Update student record
-      await updateDoc(doc(db, 'students', studentDoc.id), {
-        parentUid: profile.uid,
-        updatedAt: serverTimestamp()
-      });
 
       // Update parent profile
       await updateDoc(doc(db, 'users', profile.uid), {
@@ -299,10 +314,16 @@ export const ParentDashboard: React.FC<{ onStartCall?: (channel: string) => void
                     {isLoaded ? (
                       <GoogleMap
                         mapContainerStyle={mapContainerStyle}
-                        center={child.location || { lat: 0, lng: 0 }}
+                        center={child.location || lastKnownLocations[child.id] || mapCenters[child.id] || { lat: 34.0522, lng: -118.2437 }}
                         zoom={15}
+                        options={{
+                          disableDefaultUI: true,
+                          zoomControl: true,
+                        }}
                       >
-                        {child.location && <Marker position={child.location} />}
+                        {(child.location || lastKnownLocations[child.id]) && (
+                          <Marker position={child.location || lastKnownLocations[child.id]} />
+                        )}
                       </GoogleMap>
                     ) : (
                       <div className="h-[300px] flex items-center justify-center text-slate-400 italic text-sm">
@@ -312,13 +333,20 @@ export const ParentDashboard: React.FC<{ onStartCall?: (channel: string) => void
                   </div>
                   <div className="p-4 flex gap-2">
                     <button 
-                      onClick={() => onStartCall?.(`call_${child.childUid}`)}
+                      onClick={() => onStartCall?.(`call_${child.childUid}`, child.childUid, child.name)}
                       className="flex-1 py-3 bg-blue-600 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2"
                     >
                       <Phone className="w-4 h-4" /> Call Child
                     </button>
-                    <button className="flex-1 py-3 bg-slate-900 dark:bg-slate-950 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2">
-                      <BookOpen className="w-4 h-4" /> View Grades
+                    <button 
+                      onClick={() => {
+                        setSelectedChildForFeedback({ uid: child.childUid, name: child.name });
+                        setActiveModal('feedback');
+                      }}
+                      className="p-3 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-xl hover:bg-slate-200 transition-all"
+                      title="Give Feedback"
+                    >
+                      <MessageSquare className="w-4 h-4" />
                     </button>
                   </div>
                 </div>
@@ -355,27 +383,14 @@ export const ParentDashboard: React.FC<{ onStartCall?: (channel: string) => void
 
           {/* Quick Contacts */}
           <section className="bg-blue-600 p-6 rounded-3xl text-white shadow-xl shadow-blue-100 dark:shadow-none">
-            <h3 className="font-bold mb-4">Teacher Contact</h3>
-            <p className="text-xs text-blue-100 mb-4">Direct messaging with your child's teachers.</p>
+            <h3 className="font-bold mb-4">Messaging</h3>
+            <p className="text-xs text-blue-100 mb-4">Direct messaging with teachers and school staff.</p>
             
-            {teachers.length > 1 && (
-              <select 
-                className="w-full p-2 bg-blue-700 border border-blue-500 rounded-xl mb-4 text-sm outline-none"
-                value={selectedTeacher?.uid || ''}
-                onChange={(e) => setSelectedTeacher(teachers.find(t => t.uid === e.target.value) || null)}
-              >
-                {teachers.map(t => (
-                  <option key={t.uid} value={t.uid}>{t.name}</option>
-                ))}
-              </select>
-            )}
-
             <button 
               onClick={() => setActiveModal('messenger')}
-              disabled={!selectedTeacher}
-              className="w-full py-3 bg-white text-blue-600 rounded-xl font-bold text-sm transition-all hover:bg-blue-50 disabled:opacity-50"
+              className="w-full py-3 bg-white text-blue-600 rounded-xl font-bold text-sm transition-all hover:bg-blue-50"
             >
-              {selectedTeacher ? `Chat with ${selectedTeacher.name}` : 'Start Chat'}
+              Start Message
             </button>
           </section>
 
@@ -412,51 +427,59 @@ export const ParentDashboard: React.FC<{ onStartCall?: (channel: string) => void
               initial={{ scale: 0.9, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              className="relative bg-white dark:bg-slate-900 w-full max-w-md rounded-[2.5rem] shadow-2xl overflow-hidden"
+              className="relative bg-white dark:bg-slate-900 w-full max-w-4xl h-[80vh] rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col md:flex-row"
             >
-              <div className="p-8">
-                <div className="flex items-center justify-between mb-6">
-                  <h3 className="text-xl font-black text-slate-900 dark:text-white">Teacher Chat</h3>
-                  <button onClick={() => setActiveModal(null)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors">
+              <div className="w-full md:w-80 border-r border-slate-100 dark:border-slate-800 flex flex-col">
+                <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center">
+                  <h3 className="text-xl font-black text-slate-900 dark:text-white">Contacts</h3>
+                  <button onClick={() => setActiveModal(null)} className="md:hidden p-2">
                     <X className="w-6 h-6 text-slate-400" />
                   </button>
                 </div>
+                <div className="flex-1 overflow-hidden">
+                  <ContactList 
+                    onSelect={(c) => setSelectedContact({ uid: c.uid, displayName: c.displayName })} 
+                    selectedId={selectedContact?.uid} 
+                  />
+                </div>
+              </div>
 
-                {teachers.length > 1 && (
-                  <div className="mb-4">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Select Teacher</label>
-                    <div className="flex gap-2 overflow-x-auto pb-2">
-                      {teachers.map(t => (
-                        <button
-                          key={t.uid}
-                          onClick={() => setSelectedTeacher(t)}
-                          className={`px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
-                            selectedTeacher?.uid === t.uid 
-                              ? 'bg-blue-600 text-white' 
-                              : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
-                          }`}
-                        >
-                          {t.name}
-                        </button>
-                      ))}
+              <div className="flex-1 flex flex-col bg-slate-50 dark:bg-slate-950/50">
+                {selectedContact ? (
+                  <>
+                    <div className="p-4 border-b border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 flex justify-between items-center">
+                      <div>
+                        <h4 className="font-bold text-slate-900 dark:text-white">{selectedContact.displayName}</h4>
+                        <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Active Chat</p>
+                      </div>
+                      <button onClick={() => setActiveModal(null)} className="hidden md:block p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors">
+                        <X className="w-6 h-6 text-slate-400" />
+                      </button>
                     </div>
+                    <div className="flex-1 overflow-hidden">
+                      <Chat receiverId={selectedContact.uid} receiverName={selectedContact.displayName} />
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex-1 flex flex-col items-center justify-center p-12 text-center">
+                    <div className="w-16 h-16 bg-white dark:bg-slate-900 rounded-3xl shadow-sm flex items-center justify-center mb-4">
+                      <MessageSquare className="w-8 h-8 text-slate-200" />
+                    </div>
+                    <h4 className="font-bold text-slate-900 dark:text-white mb-2">Select a Contact</h4>
+                    <p className="text-sm text-slate-500 max-w-xs">Choose a teacher or administrator from the list to start messaging.</p>
                   </div>
                 )}
-
-                <div className="h-[400px] bg-slate-50 dark:bg-slate-800 rounded-3xl overflow-hidden">
-                  {selectedTeacher ? (
-                    <Chat receiverId={selectedTeacher.uid} receiverName={selectedTeacher.name} />
-                  ) : (
-                    <div className="flex items-center justify-center h-full text-slate-500 italic text-sm">
-                      No teacher assigned to your child yet.
-                    </div>
-                  )}
-                </div>
               </div>
             </motion.div>
           </div>
         )}
       </AnimatePresence>
+      <FeedbackModal 
+        isOpen={activeModal === 'feedback'}
+        onClose={() => setActiveModal(null)}
+        toUid={selectedChildForFeedback?.uid || ''}
+        toName={selectedChildForFeedback?.name || ''}
+      />
     </div>
   );
 };

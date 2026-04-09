@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useSearchParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
@@ -14,8 +14,11 @@ import { auth } from './lib/firebase';
 const Login = () => {
   const { user, loading } = useAuth();
   const [error, setError] = useState<string | null>(null);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
   
   const handleLogin = async () => {
+    if (isLoggingIn) return;
+    setIsLoggingIn(true);
     setError(null);
     const provider = new GoogleAuthProvider();
     try {
@@ -24,11 +27,18 @@ const Login = () => {
       console.error("Login failed:", err);
       if (err.code === 'auth/popup-blocked') {
         setError("Sign-in popup was blocked by your browser. Please allow popups for this site.");
+      } else if (err.code === 'auth/cancelled-popup-request') {
+        // This often happens if the user clicks twice or another request is pending
+        setError("A login request was already in progress or was cancelled.");
+      } else if (err.code === 'auth/popup-closed-by-user') {
+        setError("Login window was closed before completion.");
       } else if (err.code === 'auth/unauthorized-domain') {
         setError("This domain is not authorized for sign-in. Please contact the administrator.");
       } else {
         setError("Login failed: " + (err.message || "Unknown error"));
       }
+    } finally {
+      setIsLoggingIn(false);
     }
   };
 
@@ -58,15 +68,20 @@ const Login = () => {
         
         <button 
           onClick={handleLogin}
-          className="w-full py-4 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-all active:scale-95 shadow-lg shadow-blue-100 flex items-center justify-center gap-2"
+          disabled={isLoggingIn}
+          className="w-full py-4 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-all active:scale-95 shadow-lg shadow-blue-100 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-            <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-            <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
-            <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
-          </svg>
-          Sign in with Google
+          {isLoggingIn ? (
+            <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+          ) : (
+            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+              <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+              <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
+              <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
+            </svg>
+          )}
+          {isLoggingIn ? "Signing in..." : "Sign in with Google"}
         </button>
       </motion.div>
     </div>
@@ -83,6 +98,24 @@ import { ParentDashboard } from './components/dashboards/ParentDashboard';
 import { ChildDashboard } from './components/dashboards/ChildDashboard';
 import { VisitorDashboard } from './components/dashboards/VisitorDashboard';
 import { VideoCall } from './components/VideoCall';
+import { IncomingCallModal } from './components/IncomingCallModal';
+import { collection, query, where, onSnapshot, updateDoc, doc, addDoc, serverTimestamp } from 'firebase/firestore';
+import { db } from './lib/firebase';
+import { handleFirestoreError, OperationType } from './lib/firestore-errors';
+
+const VideoCallWrapper = () => {
+  const [searchParams] = useSearchParams();
+  const channel = searchParams.get('channel') || 'test';
+  const navigate = useNavigate();
+
+  return (
+    <VideoCall 
+      appId={import.meta.env.VITE_AGORA_APP_ID} 
+      channel={channel} 
+      onClose={() => navigate(-1)} 
+    />
+  );
+};
 import { Sun, Moon } from 'lucide-react';
 
 const Dashboard = () => {
@@ -92,6 +125,64 @@ const Dashboard = () => {
     return saved ? JSON.parse(saved) : false;
   });
   const [activeCall, setActiveCall] = useState<{ channel: string } | null>(null);
+  const [incomingCall, setIncomingCall] = useState<{ id: string, callerName: string, channel: string } | null>(null);
+
+  useEffect(() => {
+    if (!user?.uid) return;
+    const q = query(collection(db, 'calls'), where('receiverId', '==', user.uid), where('status', '==', 'pending'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      if (!snapshot.empty) {
+        const callData = snapshot.docs[0].data();
+        setIncomingCall({ 
+          id: snapshot.docs[0].id, 
+          callerName: callData.callerName || 'Someone', 
+          channel: callData.channel 
+        });
+      } else {
+        setIncomingCall(null);
+      }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'calls', user);
+    });
+    return () => unsubscribe();
+  }, [user?.uid]);
+
+  const handleAcceptCall = async () => {
+    if (!incomingCall) return;
+    try {
+      await updateDoc(doc(db, 'calls', incomingCall.id), { status: 'accepted' });
+      setActiveCall({ channel: incomingCall.channel });
+      setIncomingCall(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `calls/${incomingCall.id}`, user || undefined);
+    }
+  };
+
+  const handleRejectCall = async () => {
+    if (!incomingCall) return;
+    try {
+      await updateDoc(doc(db, 'calls', incomingCall.id), { status: 'rejected' });
+      setIncomingCall(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `calls/${incomingCall.id}`, user || undefined);
+    }
+  };
+
+  const startCall = async (channel: string, receiverId: string, receiverName: string) => {
+    try {
+      await addDoc(collection(db, 'calls'), {
+        callerId: user?.uid,
+        callerName: user?.displayName || 'Parent',
+        receiverId,
+        channel,
+        status: 'pending',
+        createdAt: serverTimestamp()
+      });
+      setActiveCall({ channel });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'calls', user || undefined);
+    }
+  };
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [showInstallBanner, setShowInstallBanner] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
@@ -273,8 +364,8 @@ const Dashboard = () => {
             {isTeacher && <TeacherDashboard />}
             {isQuranTeacher && <QuranTeacherDashboard />}
             {isSportsCoach && <SportsCoachDashboard />}
-            {isParent && <ParentDashboard onStartCall={(channel) => setActiveCall({ channel })} />}
-            {isChild && <ChildDashboard onStartCall={(channel) => setActiveCall({ channel })} />}
+            {isParent && <ParentDashboard onStartCall={startCall} />}
+            {isChild && <ChildDashboard onStartCall={startCall} />}
             {isAuthorizedPerson && <AuthorizedPersonDashboard />}
             
             {profile.role && !isAdmin && !isSchoolAdmin && !isTeacher && !isParent && !isChild && !isQuranTeacher && !isSportsCoach && !isAuthorizedPerson && (
@@ -319,6 +410,13 @@ const Dashboard = () => {
           onClose={() => setActiveCall(null)}
         />
       )}
+
+      <IncomingCallModal 
+        isOpen={!!incomingCall}
+        callerName={incomingCall?.callerName || ''}
+        onAccept={handleAcceptCall}
+        onReject={handleRejectCall}
+      />
     </div>
   );
 };

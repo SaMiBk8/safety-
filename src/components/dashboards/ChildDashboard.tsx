@@ -3,22 +3,38 @@ import { collection, query, where, onSnapshot, addDoc, serverTimestamp, doc, upd
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../../lib/firebase';
 import { useAuth } from '../../context/AuthContext';
-import { Student, SOSAlert } from '../../types';
+import { Student, SOSAlert, Announcement } from '../../types';
 import { motion, AnimatePresence } from 'motion/react';
-import { ShieldAlert, MapPin, Calendar, BookOpen, Clock, X, CheckCircle2, Send, FileText } from 'lucide-react';
+import { ShieldAlert, MapPin, Calendar, BookOpen, Clock, X, CheckCircle2, Send, FileText, Megaphone, MessageSquare } from 'lucide-react';
 import { handleFirestoreError, OperationType } from '../../lib/firestore-errors';
 
 import { Chat } from '../Chat';
+import { ContactList } from '../ContactList';
+import { FeedbackModal } from '../FeedbackModal';
 
-export const ChildDashboard: React.FC<{ onStartCall?: (channel: string) => void }> = ({ onStartCall }) => {
+export const ChildDashboard: React.FC<{ onStartCall?: (channel: string, receiverId: string, receiverName: string) => void }> = ({ onStartCall }) => {
   const { profile, user } = useAuth();
   const [studentData, setStudentData] = useState<Student | null>(null);
   const [isSOSActive, setIsSOSActive] = useState(false);
-  const [activeModal, setActiveModal] = useState<'homework' | 'messenger' | null>(null);
+  const [activeModal, setActiveModal] = useState<'homework' | 'messenger' | 'feedback' | null>(null);
+  const [selectedContactForFeedback, setSelectedContactForFeedback] = useState<{ uid: string, name: string } | null>(null);
+  const [selectedContact, setSelectedContact] = useState<{ uid: string, displayName: string } | null>(null);
   const [homeworkTitle, setHomeworkTitle] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [teacherProfile, setTeacherProfile] = useState<{ uid: string, name: string } | null>(null);
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+
+  useEffect(() => {
+    if (!studentData?.schoolId) return;
+    const q = query(collection(db, 'announcements'), where('schoolId', '==', studentData.schoolId));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setAnnouncements(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Announcement)));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'announcements', user || undefined);
+    });
+    return () => unsubscribe();
+  }, [studentData?.schoolId]);
 
   useEffect(() => {
     const fetchTeacher = async () => {
@@ -41,19 +57,14 @@ export const ChildDashboard: React.FC<{ onStartCall?: (channel: string) => void 
   useEffect(() => {
     if (!user?.uid) return;
 
-    const fetchStudent = async () => {
-      try {
-        const q = query(collection(db, 'students'), where('childUid', '==', user.uid));
-        const snap = await getDocs(q);
-        if (!snap.empty) {
-          setStudentData({ id: snap.docs[0].id, ...snap.docs[0].data() } as Student);
-        }
-      } catch (error) {
-        handleFirestoreError(error, OperationType.GET, 'students', user);
+    const q = query(collection(db, 'students'), where('childUid', '==', user.uid));
+    const unsubscribeStudent = onSnapshot(q, (snapshot) => {
+      if (!snapshot.empty) {
+        setStudentData({ id: snapshot.docs[0].id, ...snapshot.docs[0].data() } as Student);
       }
-    };
-
-    fetchStudent();
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'students', user || undefined);
+    });
 
     // Use real GPS if available, otherwise fallback to simulation
     const updateLocation = (lat: number, lng: number) => {
@@ -64,7 +75,7 @@ export const ChildDashboard: React.FC<{ onStartCall?: (channel: string) => void 
             lng,
             lastUpdated: serverTimestamp()
           }
-        }).catch(err => handleFirestoreError(err, OperationType.UPDATE, `students/${studentData.id}`, user));
+        }).catch(err => console.error("Location Update Error:", err));
       }
     };
 
@@ -86,10 +97,14 @@ export const ChildDashboard: React.FC<{ onStartCall?: (channel: string) => void 
         const newLng = -118.2437 + (Math.random() - 0.5) * 0.01;
         updateLocation(newLat, newLng);
       }, 10000);
-      return () => clearInterval(interval);
+      return () => {
+        unsubscribeStudent();
+        clearInterval(interval);
+      };
     }
 
     return () => {
+      unsubscribeStudent();
       if (watchId) navigator.geolocation.clearWatch(watchId);
     };
   }, [user?.uid, studentData?.id]);
@@ -108,7 +123,7 @@ export const ChildDashboard: React.FC<{ onStartCall?: (channel: string) => void 
       });
       
       if (onStartCall) {
-        onStartCall(`sos_${user?.uid}`);
+        onStartCall(`sos_${user?.uid}`, studentData.parentUid, 'Parent');
       }
 
       setTimeout(() => setIsSOSActive(false), 5000);
@@ -169,6 +184,21 @@ export const ChildDashboard: React.FC<{ onStartCall?: (channel: string) => void 
           <Send className="w-6 h-6 text-purple-600 dark:text-purple-400" />
         </button>
       </header>
+
+      {announcements.length > 0 && (
+        <motion.div 
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-blue-600 text-white p-6 rounded-[2.5rem] shadow-xl shadow-blue-100 dark:shadow-none"
+        >
+          <div className="flex items-center gap-2 mb-3">
+            <Megaphone className="w-5 h-5" />
+            <span className="text-xs font-black uppercase tracking-widest">School Announcement</span>
+          </div>
+          <h3 className="text-lg font-black mb-1">{announcements[0].title}</h3>
+          <p className="text-blue-100 text-sm">{announcements[0].content}</p>
+        </motion.div>
+      )}
 
       {/* SOS Button Section */}
       <section className="bg-white dark:bg-slate-900 p-8 rounded-[40px] border border-slate-100 dark:border-slate-800 shadow-xl text-center space-y-6">
@@ -344,29 +374,74 @@ export const ChildDashboard: React.FC<{ onStartCall?: (channel: string) => void 
               initial={{ scale: 0.9, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              className="relative bg-white dark:bg-slate-900 w-full max-w-md rounded-[2.5rem] shadow-2xl overflow-hidden"
+              className="relative bg-white dark:bg-slate-900 w-full max-w-4xl h-[80vh] rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col md:flex-row"
             >
-              <div className="p-8">
-                <div className="flex items-center justify-between mb-6">
-                  <h3 className="text-xl font-black text-slate-900 dark:text-white">Chat with Teacher</h3>
-                  <button onClick={() => setActiveModal(null)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors">
+              <div className="w-full md:w-80 border-r border-slate-100 dark:border-slate-800 flex flex-col">
+                <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center">
+                  <h3 className="text-xl font-black text-slate-900 dark:text-white">Contacts</h3>
+                  <button onClick={() => setActiveModal(null)} className="md:hidden p-2">
                     <X className="w-6 h-6 text-slate-400" />
                   </button>
                 </div>
-                <div className="h-[400px] bg-slate-50 dark:bg-slate-800 rounded-3xl overflow-hidden">
-                  {teacherProfile ? (
-                    <Chat receiverId={teacherProfile.uid} receiverName={teacherProfile.name} />
-                  ) : (
-                    <div className="flex items-center justify-center h-full text-slate-500 italic text-sm">
-                      No teacher assigned to you yet.
-                    </div>
-                  )}
+                <div className="flex-1 overflow-hidden">
+                  <ContactList 
+                    onSelect={(c) => setSelectedContact({ uid: c.uid, displayName: c.displayName })} 
+                    selectedId={selectedContact?.uid} 
+                  />
                 </div>
+                <div className="p-4 border-t border-slate-100 dark:border-slate-800">
+                  <button
+                    onClick={() => {
+                      if (selectedContact) {
+                        setSelectedContactForFeedback({ uid: selectedContact.uid, name: selectedContact.displayName });
+                        setActiveModal('feedback');
+                      }
+                    }}
+                    disabled={!selectedContact}
+                    className="w-full py-3 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-xl text-xs font-bold hover:bg-slate-200 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    <MessageSquare className="w-4 h-4" />
+                    Give Feedback
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex-1 flex flex-col bg-slate-50 dark:bg-slate-950/50">
+                {selectedContact ? (
+                  <>
+                    <div className="p-4 border-b border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 flex justify-between items-center">
+                      <div>
+                        <h4 className="font-bold text-slate-900 dark:text-white">{selectedContact.displayName}</h4>
+                        <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Active Chat</p>
+                      </div>
+                      <button onClick={() => setActiveModal(null)} className="hidden md:block p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors">
+                        <X className="w-6 h-6 text-slate-400" />
+                      </button>
+                    </div>
+                    <div className="flex-1 overflow-hidden">
+                      <Chat receiverId={selectedContact.uid} receiverName={selectedContact.displayName} />
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex-1 flex flex-col items-center justify-center p-12 text-center">
+                    <div className="w-16 h-16 bg-white dark:bg-slate-900 rounded-3xl shadow-sm flex items-center justify-center mb-4">
+                      <MessageSquare className="w-8 h-8 text-slate-200" />
+                    </div>
+                    <h4 className="font-bold text-slate-900 dark:text-white mb-2">Select a Contact</h4>
+                    <p className="text-sm text-slate-500 max-w-xs">Choose your teacher from the list to start messaging.</p>
+                  </div>
+                )}
               </div>
             </motion.div>
           </div>
         )}
       </AnimatePresence>
+      <FeedbackModal 
+        isOpen={activeModal === 'feedback'}
+        onClose={() => setActiveModal(null)}
+        toUid={selectedContactForFeedback?.uid || ''}
+        toName={selectedContactForFeedback?.name || ''}
+      />
     </div>
   );
 };

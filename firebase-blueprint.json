@@ -138,6 +138,37 @@
         "submittedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "studentId", "childUid", "title", "status", "submittedAt"]
+    },
+    "Feedback": {
+      "title": "Feedback",
+      "description": "User feedback about other users",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "fromUid": { "type": "string" },
+        "fromName": { "type": "string" },
+        "toUid": { "type": "string" },
+        "toName": { "type": "string" },
+        "rating": { "type": "number" },
+        "comment": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "fromUid", "toUid", "rating", "comment", "createdAt"]
+    },
+    "Call": {
+      "title": "Call",
+      "description": "Signaling for video calls",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "callerId": { "type": "string" },
+        "callerName": { "type": "string" },
+        "receiverId": { "type": "string" },
+        "channel": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "accepted", "rejected", "ended"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "callerId", "receiverId", "channel", "status", "createdAt"]
     }
   },
   "firestore": {
@@ -176,6 +207,14 @@
     "/homework_submissions/{submissionId}": {
       "schema": "HomeworkSubmission",
       "description": "Homework submissions"
+    },
+    "/feedbacks/{feedbackId}": {
+      "schema": "Feedback",
+      "description": "User feedback records"
+    },
+    "/calls/{callId}": {
+      "schema": "Call",
+      "description": "Call signaling records"
     }
   }
 }

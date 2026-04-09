@@ -23,7 +23,7 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const PRIMARY_ADMIN_EMAILS = ["bsami0004bsami@gmail.com", "bsami04bsami@gmail.com"];
+const PRIMARY_ADMIN_EMAILS = ["bsami0004bsami@gmail.com", "bsami04bsami@gmail.com", "www.samibook43@gmail.com", "sbou91752@gmail.com"];
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);

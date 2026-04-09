@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { collection, onSnapshot, doc, updateDoc, query, orderBy, deleteDoc, setDoc } from 'firebase/firestore';
+import { collection, onSnapshot, doc, updateDoc, query, orderBy, deleteDoc, setDoc, arrayUnion, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useAuth } from '../../context/AuthContext';
 import { UserProfile, School } from '../../types';
@@ -26,8 +26,9 @@ export const SystemAdminDashboard: React.FC = () => {
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [messages, setMessages] = useState<VisitorMessage[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeTab, setActiveTab] = useState<'users' | 'pending' | 'messages' | 'schools' | 'relationships'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'pending' | 'messages' | 'schools' | 'relationships' | 'feedbacks'>('users');
   const [schools, setSchools] = useState<School[]>([]);
+  const [feedbacks, setFeedbacks] = useState<any[]>([]);
   const [isAddingSchool, setIsAddingSchool] = useState(false);
   const [newSchool, setNewSchool] = useState({ name: '', address: '', adminEmail: '' });
   const [isCreatingSchool, setIsCreatingSchool] = useState(false);
@@ -60,10 +61,18 @@ export const SystemAdminDashboard: React.FC = () => {
       handleFirestoreError(error, OperationType.LIST, 'schools', user || undefined);
     });
 
+    const feedbacksQ = query(collection(db, 'feedbacks'), orderBy('createdAt', 'desc'));
+    const unsubscribeFeedbacks = onSnapshot(feedbacksQ, (snapshot) => {
+      setFeedbacks(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'feedbacks', user || undefined);
+    });
+
     return () => {
       unsubscribe();
       unsubscribeMessages();
       unsubscribeSchools();
+      unsubscribeFeedbacks();
     };
   }, []);
 
@@ -104,12 +113,22 @@ export const SystemAdminDashboard: React.FC = () => {
     setIsCleaning(true);
     try {
       const nonAdmins = users.filter(u => u.role !== 'system_admin');
-      const deletePromises = nonAdmins.map(u => deleteDoc(doc(db, 'users', u.uid)));
-      await Promise.all(deletePromises);
+      const resetPromises = nonAdmins.map(u => updateDoc(doc(db, 'users', u.uid), {
+        role: 'visitor',
+        status: 'active',
+        schoolId: null,
+        requestedRole: null,
+        requestMessage: null,
+        parentId: null,
+        childIds: [],
+        authorizedBy: null,
+        updatedAt: serverTimestamp()
+      }));
+      await Promise.all(resetPromises);
       setShowCleanupConfirm(false);
       setSelectedUserIds([]);
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, 'users', user || undefined);
+      handleFirestoreError(error, OperationType.UPDATE, 'users', user || undefined);
     } finally {
       setIsCleaning(false);
     }
@@ -119,11 +138,21 @@ export const SystemAdminDashboard: React.FC = () => {
     if (selectedUserIds.length === 0) return;
     setIsDeletingSelected(true);
     try {
-      const deletePromises = selectedUserIds.map(uid => deleteDoc(doc(db, 'users', uid)));
-      await Promise.all(deletePromises);
+      const resetPromises = selectedUserIds.map(uid => updateDoc(doc(db, 'users', uid), {
+        role: 'visitor',
+        status: 'active',
+        schoolId: null,
+        requestedRole: null,
+        requestMessage: null,
+        parentId: null,
+        childIds: [],
+        authorizedBy: null,
+        updatedAt: serverTimestamp()
+      }));
+      await Promise.all(resetPromises);
       setSelectedUserIds([]);
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, 'users', user || undefined);
+      handleFirestoreError(error, OperationType.UPDATE, 'users', user || undefined);
     } finally {
       setIsDeletingSelected(false);
     }
@@ -210,7 +239,7 @@ export const SystemAdminDashboard: React.FC = () => {
               ) : (
                 <UserX className="w-4 h-4" />
               )}
-              Delete Selected ({selectedUserIds.length})
+              Reset Selected ({selectedUserIds.length})
             </button>
           )}
           <button 
@@ -218,7 +247,7 @@ export const SystemAdminDashboard: React.FC = () => {
             className="flex items-center gap-2 px-4 py-2 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-xl text-sm font-bold hover:bg-red-100 transition-colors"
           >
             <UserX className="w-4 h-4" />
-            Cleanup All Non-Admins
+            Reset All Non-Admins
           </button>
           <div className="bg-blue-100 dark:bg-blue-900/30 p-3 rounded-2xl">
             <Shield className="w-6 h-6 text-blue-600 dark:text-blue-400" />
@@ -226,10 +255,10 @@ export const SystemAdminDashboard: React.FC = () => {
         </div>
       </header>
 
-      <div className="flex gap-4 border-b border-slate-100 dark:border-slate-800">
+      <div className="flex gap-4 border-b border-slate-100 dark:border-slate-800 overflow-x-auto whitespace-nowrap pb-px scrollbar-hide">
         <button 
           onClick={() => setActiveTab('users')}
-          className={`pb-4 px-2 text-sm font-bold transition-all relative ${
+          className={`pb-4 px-2 text-sm font-bold transition-all relative shrink-0 ${
             activeTab === 'users' ? 'text-blue-600' : 'text-slate-400'
           }`}
         >
@@ -238,7 +267,7 @@ export const SystemAdminDashboard: React.FC = () => {
         </button>
         <button 
           onClick={() => setActiveTab('pending')}
-          className={`pb-4 px-2 text-sm font-bold transition-all relative flex items-center gap-2 ${
+          className={`pb-4 px-2 text-sm font-bold transition-all relative flex items-center gap-2 shrink-0 ${
             activeTab === 'pending' ? 'text-blue-600' : 'text-slate-400'
           }`}
         >
@@ -252,7 +281,7 @@ export const SystemAdminDashboard: React.FC = () => {
         </button>
         <button 
           onClick={() => setActiveTab('messages')}
-          className={`pb-4 px-2 text-sm font-bold transition-all relative flex items-center gap-2 ${
+          className={`pb-4 px-2 text-sm font-bold transition-all relative flex items-center gap-2 shrink-0 ${
             activeTab === 'messages' ? 'text-blue-600' : 'text-slate-400'
           }`}
         >
@@ -264,7 +293,7 @@ export const SystemAdminDashboard: React.FC = () => {
         </button>
         <button 
           onClick={() => setActiveTab('schools')}
-          className={`pb-4 px-2 text-sm font-bold transition-all relative flex items-center gap-2 ${
+          className={`pb-4 px-2 text-sm font-bold transition-all relative flex items-center gap-2 shrink-0 ${
             activeTab === 'schools' ? 'text-blue-600' : 'text-slate-400'
           }`}
         >
@@ -273,12 +302,21 @@ export const SystemAdminDashboard: React.FC = () => {
         </button>
         <button 
           onClick={() => setActiveTab('relationships')}
-          className={`pb-4 px-2 text-sm font-bold transition-all relative flex items-center gap-2 ${
+          className={`pb-4 px-2 text-sm font-bold transition-all relative flex items-center gap-2 shrink-0 ${
             activeTab === 'relationships' ? 'text-blue-600' : 'text-slate-400'
           }`}
         >
           Relationships
           {activeTab === 'relationships' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
+        </button>
+        <button 
+          onClick={() => setActiveTab('feedbacks')}
+          className={`pb-4 px-2 text-sm font-bold transition-all relative flex items-center gap-2 shrink-0 ${
+            activeTab === 'feedbacks' ? 'text-blue-600' : 'text-slate-400'
+          }`}
+        >
+          User Feedback
+          {activeTab === 'feedbacks' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
         </button>
       </div>
 
@@ -631,6 +669,59 @@ export const SystemAdminDashboard: React.FC = () => {
             <div className="text-center py-20 text-slate-400 italic">No visitor requests yet.</div>
           )}
         </div>
+      ) : activeTab === 'feedbacks' ? (
+        <div className="space-y-4">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm overflow-hidden">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-slate-50 dark:bg-slate-800/50 border-bottom border-slate-100 dark:border-slate-800">
+                  <th className="p-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">From</th>
+                  <th className="p-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">To</th>
+                  <th className="p-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Rating</th>
+                  <th className="p-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Comment</th>
+                  <th className="p-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Date</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
+                {feedbacks.map((fb) => (
+                  <tr key={fb.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors">
+                    <td className="p-4">
+                      <div className="font-bold text-slate-900 dark:text-white text-sm">{fb.fromName}</div>
+                      <div className="text-[10px] text-slate-400">{fb.fromUid}</div>
+                    </td>
+                    <td className="p-4">
+                      <div className="font-bold text-slate-900 dark:text-white text-sm">{fb.toName}</div>
+                      <div className="text-[10px] text-slate-400">{fb.toUid}</div>
+                    </td>
+                    <td className="p-4">
+                      <div className="flex gap-0.5">
+                        {[1, 2, 3, 4, 5].map((star) => (
+                          <Shield 
+                            key={star}
+                            className={`w-3 h-3 ${star <= fb.rating ? 'text-amber-400 fill-amber-400' : 'text-slate-200 dark:text-slate-700'}`} 
+                          />
+                        ))}
+                      </div>
+                    </td>
+                    <td className="p-4">
+                      <p className="text-xs text-slate-600 dark:text-slate-400 max-w-xs">{fb.comment}</p>
+                    </td>
+                    <td className="p-4">
+                      <div className="text-[10px] text-slate-400">
+                        {fb.createdAt?.toDate().toLocaleString()}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {feedbacks.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="p-10 text-center text-slate-400 italic">No feedback submitted yet.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
       ) : (
         <div className="space-y-6">
           <div className="flex justify-between items-center">
@@ -745,7 +836,7 @@ export const SystemAdminDashboard: React.FC = () => {
                 </div>
                 <h3 className="text-xl font-black text-slate-900 dark:text-white">Dangerous Action</h3>
                 <p className="text-slate-500 dark:text-slate-400">
-                  This will permanently delete all accounts that are not System Administrators. This action cannot be undone.
+                  This will reset all accounts that are not System Administrators to Visitor status. This action cannot be undone.
                 </p>
                 <div className="flex gap-3 pt-4">
                   <button 
@@ -763,10 +854,10 @@ export const SystemAdminDashboard: React.FC = () => {
                     {isCleaning ? (
                       <>
                         <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                        Cleaning...
+                        Resetting...
                       </>
                     ) : (
-                      'Delete All'
+                      'Reset All'
                     )}
                   </button>
                 </div>
