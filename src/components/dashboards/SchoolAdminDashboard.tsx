@@ -1,14 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { collection, addDoc, query, where, onSnapshot, serverTimestamp, doc, updateDoc, orderBy, getDocs } from 'firebase/firestore';
-import { db } from '../../lib/firebase';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { db, storage } from '../../lib/firebase';
 import { useAuth } from '../../context/AuthContext';
 import { Announcement, UserProfile } from '../../types';
 import { motion, AnimatePresence } from 'motion/react';
-import { Plus, Megaphone, Users, Calendar, CheckCircle2, X, Clock, FileText, MessageSquare, GraduationCap } from 'lucide-react';
+import { Plus, Megaphone, Users, Calendar, CheckCircle2, X, Clock, FileText, MessageSquare, GraduationCap, Trash2 } from 'lucide-react';
 import { Chat } from '../Chat';
 import { ContactList } from '../ContactList';
 import { FeedbackModal } from '../FeedbackModal';
 import { handleFirestoreError, OperationType } from '../../lib/firestore-errors';
+import { deleteDoc } from 'firebase/firestore';
 
 interface VisitorMessage {
   id: string;
@@ -26,12 +28,13 @@ interface VisitorMessage {
 
 export const SchoolAdminDashboard: React.FC = () => {
   const { user, profile } = useAuth();
-  const [activeTab, setActiveTab] = useState<'announcements' | 'staff' | 'students' | 'requests' | 'messenger' | 'feedback'>('announcements');
+  const [activeTab, setActiveTab] = useState<'announcements' | 'staff' | 'students' | 'requests' | 'messenger' | 'feedback' | 'submissions'>('announcements');
   const [selectedContactForFeedback, setSelectedContactForFeedback] = useState<{ uid: string, name: string } | null>(null);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [staff, setStaff] = useState<UserProfile[]>([]);
   const [parents, setParents] = useState<UserProfile[]>([]);
   const [students, setStudents] = useState<any[]>([]);
+  const [submissions, setSubmissions] = useState<any[]>([]);
   const [requests, setRequests] = useState<VisitorMessage[]>([]);
   const [selectedContact, setSelectedContact] = useState<UserProfile | null>(null);
   const [newTitle, setNewTitle] = useState('');
@@ -40,6 +43,22 @@ export const SchoolAdminDashboard: React.FC = () => {
   const [isAddingTeacher, setIsAddingTeacher] = useState(false);
   const [teacherEmail, setTeacherEmail] = useState('');
   const [addTeacherStatus, setAddTeacherStatus] = useState<{ type: 'success' | 'error', message: string } | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [unreadTotal, setUnreadTotal] = useState(0);
+
+  useEffect(() => {
+    if (!user?.uid) return;
+    const q = query(
+      collection(db, 'messages'),
+      where('receiverId', '==', user.uid),
+      where('isRead', '==', false)
+    );
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setUnreadTotal(snapshot.size);
+    });
+    return () => unsubscribe();
+  }, [user?.uid]);
 
   useEffect(() => {
     if (!profile?.schoolId) return;
@@ -61,7 +80,7 @@ export const SchoolAdminDashboard: React.FC = () => {
       where('role', 'in', ['teacher', 'quran_teacher', 'sports_coach'])
     );
     const unsubscribeStaff = onSnapshot(staffQ, (snapshot) => {
-      setStaff(snapshot.docs.map(doc => doc.data() as UserProfile));
+      setStaff(snapshot.docs.map(doc => ({ ...doc.data(), uid: doc.id } as UserProfile)));
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'users', user || undefined);
     });
@@ -83,7 +102,7 @@ export const SchoolAdminDashboard: React.FC = () => {
       where('role', '==', 'parent')
     );
     const unsubscribeParents = onSnapshot(parentsQ, (snapshot) => {
-      setParents(snapshot.docs.map(doc => doc.data() as UserProfile));
+      setParents(snapshot.docs.map(doc => ({ ...doc.data(), uid: doc.id } as UserProfile)));
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'users', user || undefined);
     });
@@ -98,14 +117,50 @@ export const SchoolAdminDashboard: React.FC = () => {
       handleFirestoreError(error, OperationType.LIST, 'students', user || undefined);
     });
 
+    const subQ = query(
+      collection(db, 'homework_submissions'),
+      where('schoolId', '==', profile.schoolId),
+      orderBy('submittedAt', 'desc')
+    );
+    const unsubscribeSub = onSnapshot(subQ, (snapshot) => {
+      setSubmissions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'homework_submissions', user || undefined);
+    });
+
     return () => {
       unsubscribeAnn();
       unsubscribeStaff();
       unsubscribeRequests();
       unsubscribeParents();
       unsubscribeStudents();
+      unsubscribeSub();
     };
   }, [profile?.schoolId]);
+
+  const deleteUser = async (uid: string) => {
+    if (uid === user?.uid) {
+      alert('You cannot delete your own account.');
+      return;
+    }
+    if (!window.confirm('Are you sure you want to permanently delete this account? This action cannot be undone.')) return;
+    try {
+      await deleteDoc(doc(db, 'users', uid));
+      alert('Account successfully deleted.');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `users/${uid}`, user || undefined);
+    }
+  };
+
+  const deleteStudent = async (studentId: string) => {
+    if (!window.confirm('Are you sure you want to permanently delete this student record? This action cannot be undone.')) return;
+    try {
+      await deleteDoc(doc(db, 'students', studentId));
+      alert('Student record successfully deleted.');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `students/${studentId}`, user || undefined);
+    }
+  };
 
   const handleApproveRequest = async (request: VisitorMessage) => {
     if (!profile?.schoolId) return;
@@ -165,22 +220,50 @@ export const SchoolAdminDashboard: React.FC = () => {
     }
   };
 
+  const handleUpdateGrade = async (studentId: string, grade: string) => {
+    try {
+      await updateDoc(doc(db, 'students', studentId), {
+        grade: grade,
+        updatedAt: serverTimestamp()
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `students/${studentId}`, user || undefined);
+    }
+  };
+
   const handleAddAnnouncement = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!profile?.schoolId) return;
 
+    setUploading(true);
     try {
+      let fileUrl = '';
+      let fileName = '';
+
+      if (selectedFile) {
+        const storageRef = ref(storage, `announcements/${profile.schoolId}/${Date.now()}_${selectedFile.name}`);
+        await uploadBytes(storageRef, selectedFile);
+        fileUrl = await getDownloadURL(storageRef);
+        fileName = selectedFile.name;
+      }
+
       await addDoc(collection(db, 'announcements'), {
         schoolId: profile.schoolId,
         title: newTitle,
         content: newContent,
+        fileName,
+        fileUrl,
+        authorId: profile.uid,
         createdAt: serverTimestamp()
       });
       setNewTitle('');
       setNewContent('');
+      setSelectedFile(null);
       setIsAdding(false);
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'announcements', user || undefined);
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -227,6 +310,31 @@ export const SchoolAdminDashboard: React.FC = () => {
     }
   };
 
+  const exportAnnouncements = () => {
+    if (announcements.length === 0) return;
+    const headers = ['Title', 'Content', 'Author ID', 'Created At', 'File URL'];
+    const csvContent = [
+      headers.join(','),
+      ...announcements.map(ann => [
+        `"${ann.title.replace(/"/g, '""')}"`,
+        `"${ann.content.replace(/"/g, '""')}"`,
+        ann.authorId,
+        ann.createdAt?.toDate().toISOString(),
+        ann.fileUrl || ''
+      ].join(','))
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `announcements_${profile?.schoolId || 'export'}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <div className="space-y-8">
       <header className="flex items-center justify-between">
@@ -235,6 +343,13 @@ export const SchoolAdminDashboard: React.FC = () => {
           <p className="text-slate-500 dark:text-slate-400">Manage teachers, announcements, and permissions</p>
         </div>
         <div className="flex gap-2">
+          <button 
+            onClick={exportAnnouncements}
+            className="flex items-center gap-2 px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-xl font-semibold hover:bg-slate-200 transition-all"
+          >
+            <FileText className="w-4 h-4" />
+            Export CSV
+          </button>
           <button 
             onClick={() => setIsAdding(true)}
             className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-all shadow-lg shadow-blue-100 dark:shadow-none"
@@ -274,6 +389,15 @@ export const SchoolAdminDashboard: React.FC = () => {
           {activeTab === 'students' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
         </button>
         <button 
+          onClick={() => setActiveTab('submissions')}
+          className={`pb-4 px-2 text-sm font-bold transition-all relative shrink-0 ${
+            activeTab === 'submissions' ? 'text-blue-600' : 'text-slate-400'
+          }`}
+        >
+          Submissions
+          {activeTab === 'submissions' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
+        </button>
+        <button 
           onClick={() => setActiveTab('requests')}
           className={`pb-4 px-2 text-sm font-bold transition-all relative flex items-center gap-2 shrink-0 ${
             activeTab === 'requests' ? 'text-blue-600' : 'text-slate-400'
@@ -287,11 +411,16 @@ export const SchoolAdminDashboard: React.FC = () => {
         </button>
         <button 
           onClick={() => setActiveTab('messenger')}
-          className={`pb-4 px-2 text-sm font-bold transition-all relative shrink-0 ${
+          className={`pb-4 px-2 text-sm font-bold transition-all relative shrink-0 flex items-center gap-2 ${
             activeTab === 'messenger' ? 'text-blue-600' : 'text-slate-400'
           }`}
         >
           Messenger
+          {unreadTotal > 0 && (
+            <span className="bg-red-500 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full animate-bounce">
+              {unreadTotal}
+            </span>
+          )}
           {activeTab === 'messenger' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
         </button>
       </div>
@@ -326,6 +455,14 @@ export const SchoolAdminDashboard: React.FC = () => {
                 onChange={(e) => setNewContent(e.target.value)}
                 required
               />
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-slate-500 uppercase px-1">Attach File (Optional)</label>
+                <input 
+                  type="file" 
+                  onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+                  className="w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-bold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                />
+              </div>
               <div className="flex justify-end gap-3">
                 <button 
                   type="button"
@@ -336,9 +473,11 @@ export const SchoolAdminDashboard: React.FC = () => {
                 </button>
                 <button 
                   type="submit"
-                  className="px-6 py-2 bg-blue-600 text-white rounded-xl font-semibold"
+                  disabled={uploading}
+                  className="px-6 py-2 bg-blue-600 text-white rounded-xl font-semibold disabled:opacity-50 flex items-center gap-2"
                 >
-                  Post Announcement
+                  {uploading && <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
+                  {uploading ? 'Posting...' : 'Post Announcement'}
                 </button>
               </div>
             </motion.form>
@@ -349,6 +488,19 @@ export const SchoolAdminDashboard: React.FC = () => {
               <div key={ann.id} className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm">
                 <h3 className="font-bold text-slate-900 dark:text-white mb-2">{ann.title}</h3>
                 <p className="text-slate-600 dark:text-slate-400 text-sm leading-relaxed mb-4">{ann.content}</p>
+                {ann.fileUrl && (
+                  <div className="mb-4">
+                    <a 
+                      href={ann.fileUrl} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-2 p-2 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded-xl text-xs font-bold hover:underline"
+                    >
+                      <FileText className="w-4 h-4" />
+                      {ann.fileName || 'View Attachment'}
+                    </a>
+                  </div>
+                )}
                 <div className="flex items-center gap-2 text-xs text-slate-400 dark:text-slate-500">
                   <Calendar className="w-3 h-3" />
                   {ann.createdAt?.toDate().toLocaleDateString()}
@@ -477,7 +629,16 @@ export const SchoolAdminDashboard: React.FC = () => {
                     <span className={`text-xs font-bold uppercase ${member.status === 'active' ? 'text-emerald-500' : 'text-amber-500'}`}>
                       {member.status}
                     </span>
-                    <button className="text-xs font-bold text-blue-600 hover:underline">View Profile</button>
+                    <div className="flex items-center gap-2">
+                      <button 
+                        onClick={() => deleteUser(member.uid)}
+                        className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-colors"
+                        title="Delete Staff Member"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                      <button className="text-xs font-bold text-blue-600 hover:underline">View Profile</button>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -490,15 +651,22 @@ export const SchoolAdminDashboard: React.FC = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {parents.map((parent) => (
                 <div key={parent.uid} className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm">
-                  <div className="flex items-center gap-4 mb-4">
-                    <div className="w-12 h-12 bg-purple-50 dark:bg-purple-900/30 rounded-2xl flex items-center justify-center text-purple-600 font-black text-xl">
-                      {parent.displayName?.[0] || 'P'}
+                    <div className="flex items-center gap-4 mb-4">
+                      <div className="w-12 h-12 bg-purple-50 dark:bg-purple-900/30 rounded-2xl flex items-center justify-center text-purple-600 font-black text-xl">
+                        {parent.displayName?.[0] || 'P'}
+                      </div>
+                      <div className="flex-1">
+                        <h4 className="font-bold text-slate-900 dark:text-white">{parent.displayName || 'Parent'}</h4>
+                        <p className="text-xs text-slate-500">{parent.email}</p>
+                      </div>
+                      <button 
+                        onClick={() => deleteUser(parent.uid)}
+                        className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-colors"
+                        title="Delete Parent"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </div>
-                    <div>
-                      <h4 className="font-bold text-slate-900 dark:text-white">{parent.displayName || 'Parent'}</h4>
-                      <p className="text-xs text-slate-500">{parent.email}</p>
-                    </div>
-                  </div>
                   <div className="space-y-2 pt-4 border-t border-slate-50 dark:border-slate-800">
                     <div className="text-[10px] font-black text-slate-400 uppercase">Linked Children</div>
                     <div className="flex flex-wrap gap-2">
@@ -535,7 +703,7 @@ export const SchoolAdminDashboard: React.FC = () => {
               <thead>
                 <tr className="bg-slate-50 dark:bg-slate-800/50">
                   <th className="p-4 text-xs font-black text-slate-400 uppercase tracking-widest">Student Name</th>
-                  <th className="p-4 text-xs font-black text-slate-400 uppercase tracking-widest">Grade</th>
+                  <th className="p-4 text-xs font-black text-slate-400 uppercase tracking-widest">Class / Grade</th>
                   <th className="p-4 text-xs font-black text-slate-400 uppercase tracking-widest">Assigned Teacher</th>
                   <th className="p-4 text-xs font-black text-slate-400 uppercase tracking-widest">Actions</th>
                 </tr>
@@ -548,9 +716,31 @@ export const SchoolAdminDashboard: React.FC = () => {
                       <div className="text-[10px] text-slate-400">ID: {student.id.slice(-6)}</div>
                     </td>
                     <td className="p-4">
-                      <span className="px-2 py-1 bg-slate-100 dark:bg-slate-800 rounded-lg text-xs font-bold text-slate-600 dark:text-slate-400">
-                        {student.grade}
-                      </span>
+                      <select 
+                        className="bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 dark:text-white w-full max-w-[150px]"
+                        value={student.grade || ''}
+                        onChange={(e) => handleUpdateGrade(student.id, e.target.value)}
+                      >
+                        <option value="">No Class</option>
+                        <optgroup label="Primary">
+                          <option value="1st Grade">1st Grade</option>
+                          <option value="2nd Grade">2nd Grade</option>
+                          <option value="3rd Grade">3rd Grade</option>
+                          <option value="4th Grade">4th Grade</option>
+                          <option value="5th Grade">5th Grade</option>
+                          <option value="6th Grade">6th Grade</option>
+                        </optgroup>
+                        <optgroup label="Middle School">
+                          <option value="7th Grade">7th Grade</option>
+                          <option value="8th Grade">8th Grade</option>
+                          <option value="9th Grade">9th Grade</option>
+                        </optgroup>
+                        <optgroup label="High School">
+                          <option value="10th Grade">10th Grade</option>
+                          <option value="11th Grade">11th Grade</option>
+                          <option value="12th Grade">12th Grade</option>
+                        </optgroup>
+                      </select>
                     </td>
                     <td className="p-4">
                       <select 
@@ -567,7 +757,16 @@ export const SchoolAdminDashboard: React.FC = () => {
                       </select>
                     </td>
                     <td className="p-4">
-                      <button className="text-xs font-bold text-blue-600 hover:underline">View Details</button>
+                      <div className="flex items-center gap-2">
+                        <button 
+                          onClick={() => deleteStudent(student.id)}
+                          className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-colors"
+                          title="Delete Student"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                        <button className="text-xs font-bold text-blue-600 hover:underline">View Details</button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -581,6 +780,38 @@ export const SchoolAdminDashboard: React.FC = () => {
               </tbody>
             </table>
           </div>
+        </div>
+      ) : activeTab === 'submissions' ? (
+        <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm overflow-hidden">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-slate-50 dark:bg-slate-800/50 border-bottom border-slate-100 dark:border-slate-800">
+                <th className="p-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Student</th>
+                <th className="p-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Homework</th>
+                <th className="p-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Date</th>
+                <th className="p-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
+              {submissions.map((sub) => (
+                <tr key={sub.id}>
+                  <td className="p-4 font-bold text-slate-900 dark:text-white">{sub.studentName}</td>
+                  <td className="p-4 text-slate-600 dark:text-slate-400">{sub.title}</td>
+                  <td className="p-4 text-xs text-slate-500">{sub.submittedAt?.toDate()?.toLocaleString() || 'Pending...'}</td>
+                  <td className="p-4 text-right">
+                    {sub.fileUrl && (
+                      <a href={sub.fileUrl} target="_blank" rel="noreferrer" className="text-blue-600 font-bold text-xs hover:underline">View File</a>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {submissions.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="p-8 text-center text-slate-400 italic text-sm">No submissions found.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
       ) : activeTab === 'messenger' ? (
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">

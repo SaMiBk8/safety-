@@ -1,23 +1,45 @@
 import React, { useEffect, useState } from 'react';
-import { collection, query, where, onSnapshot, addDoc, serverTimestamp, getDocs, doc, getDoc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, addDoc, serverTimestamp, getDocs, doc, getDoc, updateDoc, orderBy } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useAuth } from '../../context/AuthContext';
 import { Student, Announcement } from '../../types';
 import { motion, AnimatePresence } from 'motion/react';
-import { Book, MessageSquare, Calendar, Users, X, CheckCircle2, Star, Clock, BookOpen, Megaphone } from 'lucide-react';
+import { Book, MessageSquare, Calendar, Users, X, CheckCircle2, Star, Clock, BookOpen, Megaphone, Plus } from 'lucide-react';
 import { handleFirestoreError, OperationType } from '../../lib/firestore-errors';
 import { Chat } from '../Chat';
 
 export const QuranTeacherDashboard: React.FC = () => {
   const { user, profile } = useAuth();
   const [students, setStudents] = useState<Student[]>([]);
-  const [activeTab, setActiveTab] = useState<'classes' | 'students' | 'schedule' | 'messenger'>('classes');
+  const [activeTab, setActiveTab] = useState<'classes' | 'students' | 'schedule' | 'messenger' | 'submissions'>('classes');
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
   const [hifzProgress, setHifzProgress] = useState({ surah: '', ayah: '', rating: 5, notes: '' });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [parents, setParents] = useState<{ uid: string, name: string, studentName: string }[]>([]);
   const [selectedParent, setSelectedParent] = useState<{ uid: string, name: string } | null>(null);
+  const [submissions, setSubmissions] = useState<any[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [viewMode, setViewMode] = useState<'my' | 'all'>('all');
+  const [teacherSubject, setTeacherSubject] = useState(profile?.subject || 'Quran');
+  const [unreadTotal, setUnreadTotal] = useState(0);
+  const [assignments, setAssignments] = useState<any[]>([]);
+  const [isAddingAssignment, setIsAddingAssignment] = useState(false);
+  const [newAssignTitle, setNewAssignTitle] = useState('');
+  const [newAssignDesc, setNewAssignDesc] = useState('');
+  const [newAssignDueDate, setNewAssignDueDate] = useState('');
+
+  useEffect(() => {
+    if (!user?.uid) return;
+    const q = query(
+      collection(db, 'messages'),
+      where('receiverId', '==', user.uid),
+      where('isRead', '==', false)
+    );
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setUnreadTotal(snapshot.size);
+    });
+    return () => unsubscribe();
+  }, [user?.uid]);
 
   useEffect(() => {
     if (!profile?.schoolId) return;
@@ -40,6 +62,37 @@ export const QuranTeacherDashboard: React.FC = () => {
     });
     return () => unsubscribe();
   }, [profile?.schoolId]);
+
+  useEffect(() => {
+    if (!profile?.schoolId) return;
+    const q = query(
+      collection(db, 'homework_submissions'), 
+      where('schoolId', '==', profile.schoolId),
+      orderBy('submittedAt', 'desc')
+    );
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setSubmissions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'homework_submissions', user || undefined);
+    });
+    return () => unsubscribe();
+  }, [profile?.schoolId]);
+
+  useEffect(() => {
+    if (!profile?.schoolId) return;
+    const q = query(
+      collection(db, 'assignments'),
+      where('schoolId', '==', profile.schoolId),
+      where('teacherId', '==', profile.uid),
+      orderBy('createdAt', 'desc')
+    );
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setAssignments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'assignments', user || undefined);
+    });
+    return () => unsubscribe();
+  }, [profile?.schoolId, profile?.uid]);
 
   useEffect(() => {
     const fetchParents = async () => {
@@ -93,6 +146,55 @@ export const QuranTeacherDashboard: React.FC = () => {
     }
   };
 
+  const handleAddAssignment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!profile?.schoolId || !profile?.uid) return;
+
+    try {
+      await addDoc(collection(db, 'assignments'), {
+        schoolId: profile.schoolId,
+        teacherId: profile.uid,
+        teacherName: profile.displayName || 'Teacher',
+        teacherRole: profile.role,
+        title: newAssignTitle,
+        description: newAssignDesc,
+        dueDate: newAssignDueDate ? new Date(newAssignDueDate) : null,
+        createdAt: serverTimestamp()
+      });
+      setNewAssignTitle('');
+      setNewAssignDesc('');
+      setNewAssignDueDate('');
+      setIsAddingAssignment(false);
+      alert('Assignment created successfully!');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'assignments', user || undefined);
+    }
+  };
+
+  const handleAssignToMe = async (studentId: string) => {
+    try {
+      await updateDoc(doc(db, 'students', studentId), {
+        teacherId: profile?.uid,
+        subject: teacherSubject,
+        updatedAt: serverTimestamp()
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `students/${studentId}`, user || undefined);
+    }
+  };
+
+  const handleUpdateTeacherSubject = async () => {
+    if (!profile?.uid) return;
+    try {
+      await updateDoc(doc(db, 'users', profile.uid), {
+        subject: teacherSubject,
+        updatedAt: serverTimestamp()
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `users/${profile.uid}`, user || undefined);
+    }
+  };
+
   return (
     <div className="space-y-8">
       <header className="flex items-center justify-between">
@@ -121,6 +223,8 @@ export const QuranTeacherDashboard: React.FC = () => {
           { id: 'classes', icon: BookOpen, label: 'My Classes' },
           { id: 'students', icon: Users, label: 'Students' },
           { id: 'schedule', icon: Calendar, label: 'Schedule' },
+          { id: 'assignments', icon: BookOpen, label: 'Assignments' },
+          { id: 'submissions', icon: BookOpen, label: 'Submissions' },
           { id: 'messenger', icon: MessageSquare, label: 'Messenger' },
         ].map(tab => (
           <button
@@ -132,20 +236,68 @@ export const QuranTeacherDashboard: React.FC = () => {
           >
             <tab.icon className="w-4 h-4" />
             {tab.label}
+            {tab.id === 'messenger' && unreadTotal > 0 && (
+              <span className="bg-red-500 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full animate-bounce">
+                {unreadTotal}
+              </span>
+            )}
             {activeTab === tab.id && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-600" />}
           </button>
         ))}
       </div>
 
       {activeTab === 'classes' ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="space-y-6">
+          <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex items-center gap-2">
+                <BookOpen className="w-5 h-5 text-emerald-600" />
+                <span className="font-bold text-slate-900 dark:text-white">My Subject/Group:</span>
+                <input 
+                  type="text" 
+                  value={teacherSubject}
+                  onChange={(e) => setTeacherSubject(e.target.value)}
+                  placeholder="e.g. Hifz Group A"
+                  className="px-3 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-lg text-sm outline-none focus:ring-2 focus:ring-emerald-500 dark:text-white"
+                />
+                <button 
+                  onClick={handleUpdateTeacherSubject}
+                  className="p-1.5 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded-lg transition-colors"
+                  title="Save Subject"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
+                <button 
+                  onClick={() => setViewMode('my')}
+                  className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${viewMode === 'my' ? 'bg-white dark:bg-slate-700 text-emerald-600 shadow-sm' : 'text-slate-500'}`}
+                >
+                  My Students
+                </button>
+                <button 
+                  onClick={() => setViewMode('all')}
+                  className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${viewMode === 'all' ? 'bg-white dark:bg-slate-700 text-emerald-600 shadow-sm' : 'text-slate-500'}`}
+                >
+                  All Students
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           <div className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 shadow-sm space-y-4">
             <div className="w-12 h-12 bg-emerald-50 dark:bg-emerald-900/20 rounded-2xl flex items-center justify-center">
               <Star className="w-6 h-6 text-emerald-600" />
             </div>
             <h3 className="text-xl font-black text-slate-900 dark:text-white uppercase tracking-tight">Hifz Group A</h3>
             <p className="text-sm text-slate-500">Advanced memorization group. 12 active students.</p>
-            <button className="w-full py-3 bg-emerald-600 text-white rounded-xl font-bold text-sm">Manage Group</button>
+            <button 
+              onClick={() => setActiveTab('students')}
+              className="w-full py-3 bg-emerald-600 text-white rounded-xl font-bold text-sm"
+            >
+              Manage Group
+            </button>
           </div>
           <div className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 shadow-sm space-y-4">
             <div className="w-12 h-12 bg-blue-50 dark:bg-blue-900/20 rounded-2xl flex items-center justify-center">
@@ -153,22 +305,43 @@ export const QuranTeacherDashboard: React.FC = () => {
             </div>
             <h3 className="text-xl font-black text-slate-900 dark:text-white uppercase tracking-tight">Tajweed Level 1</h3>
             <p className="text-sm text-slate-500">Foundational rules of recitation. 8 active students.</p>
-            <button className="w-full py-3 bg-blue-600 text-white rounded-xl font-bold text-sm">Manage Group</button>
+            <button 
+              onClick={() => setActiveTab('students')}
+              className="w-full py-3 bg-blue-600 text-white rounded-xl font-bold text-sm"
+            >
+              Manage Group
+            </button>
+          </div>
           </div>
         </div>
       ) : activeTab === 'students' ? (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {students.map(student => (
+            {students
+              .filter(s => viewMode === 'my' ? s.teacherId === profile?.uid : true)
+              .map(student => (
               <div key={student.id} className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm">
-                <div className="flex items-center gap-4 mb-4">
-                  <div className="w-12 h-12 bg-emerald-50 dark:bg-emerald-900/20 rounded-2xl flex items-center justify-center text-emerald-600 font-bold">
-                    {student.name[0]}
+                <div className="flex items-center justify-between gap-4 mb-4">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-emerald-50 dark:bg-emerald-900/20 rounded-2xl flex items-center justify-center text-emerald-600 font-bold">
+                      {student.name[0]}
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-slate-900 dark:text-white">{student.name}</h4>
+                      <p className="text-xs text-slate-500">Grade: {student.grade}</p>
+                      {student.subject && (
+                        <p className="text-[10px] text-emerald-600 font-bold uppercase">{student.subject}</p>
+                      )}
+                    </div>
                   </div>
-                  <div>
-                    <h4 className="font-bold text-slate-900 dark:text-white">{student.name}</h4>
-                    <p className="text-xs text-slate-500">Grade: {student.grade}</p>
-                  </div>
+                  {viewMode === 'all' && student.teacherId !== profile?.uid && (
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); handleAssignToMe(student.id); }}
+                      className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-[10px] font-bold hover:bg-emerald-700 transition-colors"
+                    >
+                      Assign to Me
+                    </button>
+                  )}
                 </div>
                 <button 
                   onClick={() => setSelectedStudent(student)}
@@ -270,6 +443,122 @@ export const QuranTeacherDashboard: React.FC = () => {
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+      ) : activeTab === 'submissions' ? (
+        <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm overflow-hidden">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-slate-50 dark:bg-slate-800/50 border-bottom border-slate-100 dark:border-slate-800">
+                <th className="p-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Student</th>
+                <th className="p-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Homework</th>
+                <th className="p-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Date</th>
+                <th className="p-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
+              {submissions.map((sub) => (
+                <tr key={sub.id}>
+                  <td className="p-4 font-bold text-slate-900 dark:text-white">{sub.studentName}</td>
+                  <td className="p-4 text-slate-600 dark:text-slate-400">{sub.title}</td>
+                  <td className="p-4 text-xs text-slate-500">{sub.submittedAt?.toDate()?.toLocaleString() || 'Pending...'}</td>
+                  <td className="p-4 text-right">
+                    {sub.fileUrl && (
+                      <a href={sub.fileUrl} target="_blank" rel="noreferrer" className="text-emerald-600 font-bold text-xs hover:underline">View File</a>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {submissions.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="p-8 text-center text-slate-400 italic text-sm">No submissions found.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      ) : activeTab === 'assignments' ? (
+        <div className="space-y-6">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-slate-900 dark:text-white font-bold text-xl">
+              <BookOpen className="w-6 h-6 text-emerald-600" />
+              Manage Quran Assignments
+            </div>
+            <button 
+              onClick={() => setIsAddingAssignment(true)}
+              className="px-4 py-2 bg-emerald-600 text-white rounded-xl text-sm font-bold flex items-center gap-2"
+            >
+              <Plus className="w-4 h-4" /> Create Assignment
+            </button>
+          </div>
+
+          {isAddingAssignment && (
+            <motion.form 
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              onSubmit={handleAddAssignment}
+              className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-emerald-100 dark:border-slate-800 shadow-sm space-y-4"
+            >
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <input 
+                  type="text" 
+                  placeholder="Assignment Title (e.g. Memorize Surah Al-Mulk)" 
+                  className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 dark:text-white"
+                  value={newAssignTitle}
+                  onChange={(e) => setNewAssignTitle(e.target.value)}
+                  required
+                />
+                <input 
+                  type="date" 
+                  className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 dark:text-white"
+                  value={newAssignDueDate}
+                  onChange={(e) => setNewAssignDueDate(e.target.value)}
+                />
+              </div>
+              <textarea 
+                placeholder="Describe the task for your students..." 
+                className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 min-h-[120px] dark:text-white"
+                value={newAssignDesc}
+                onChange={(e) => setNewAssignDesc(e.target.value)}
+                required
+              />
+              <div className="flex justify-end gap-3">
+                <button 
+                  type="button"
+                  onClick={() => setIsAddingAssignment(false)}
+                  className="px-4 py-2 text-slate-500 dark:text-slate-400 font-semibold"
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="submit"
+                  className="px-6 py-2 bg-emerald-600 text-white rounded-xl font-semibold"
+                >
+                  Create Assignment
+                </button>
+              </div>
+            </motion.form>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {assignments.map((assign) => (
+              <div key={assign.id} className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm">
+                <h3 className="font-bold text-slate-900 dark:text-white mb-2">{assign.title}</h3>
+                <p className="text-slate-600 dark:text-slate-400 text-sm leading-relaxed mb-4">{assign.description}</p>
+                <div className="flex items-center justify-between mt-4 pt-4 border-t border-slate-50 dark:border-slate-800">
+                  <div className="flex items-center gap-2 text-xs text-slate-400">
+                    <Calendar className="w-3 h-3" />
+                    Due: {assign.dueDate ? new Date(assign.dueDate.seconds * 1000).toLocaleDateString() : 'No deadline'}
+                  </div>
+                  <div className="text-[10px] text-slate-400">
+                    Created: {assign.createdAt?.toDate().toLocaleDateString()}
+                  </div>
+                </div>
+              </div>
+            ))}
+            {assignments.length === 0 && !isAddingAssignment && (
+              <div className="col-span-full text-center py-20 text-slate-400 italic">No assignments created yet.</div>
+            )}
           </div>
         </div>
       ) : activeTab === 'messenger' ? (

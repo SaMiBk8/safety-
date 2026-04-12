@@ -11,7 +11,7 @@ import { signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
 import { auth } from './lib/firebase';
 
 // Basic Login Component
-const Login = () => {
+const Login = ({ isDarkMode, setIsDarkMode }: { isDarkMode: boolean, setIsDarkMode: (v: boolean) => void }) => {
   const { user, loading } = useAuth();
   const [error, setError] = useState<string | null>(null);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
@@ -46,22 +46,31 @@ const Login = () => {
   if (user) return <Navigate to="/dashboard" />;
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50 p-6 text-center">
+    <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50 dark:bg-slate-950 p-6 text-center transition-colors duration-300">
+      <div className="fixed top-6 right-6">
+        <button 
+          onClick={() => setIsDarkMode(!isDarkMode)}
+          className="p-3 bg-white dark:bg-slate-900 text-slate-400 hover:text-blue-600 dark:hover:text-amber-400 rounded-2xl shadow-lg shadow-slate-200 dark:shadow-none transition-all"
+        >
+          {isDarkMode ? <Sun className="w-6 h-6" /> : <Moon className="w-6 h-6" />}
+        </button>
+      </div>
+
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="max-w-md w-full bg-white rounded-3xl shadow-xl p-8 border border-slate-100"
+        className="max-w-md w-full bg-white dark:bg-slate-900 rounded-3xl shadow-xl p-8 border border-slate-100 dark:border-slate-800"
       >
-        <div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center mb-6 mx-auto shadow-lg shadow-blue-200">
+        <div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center mb-6 mx-auto shadow-lg shadow-blue-200 dark:shadow-none">
           <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
           </svg>
         </div>
-        <h1 className="text-2xl font-bold text-slate-900 mb-2">SafeChild</h1>
-        <p className="text-slate-500 mb-8 italic">Professional Child Safety & Educational Coordination</p>
+        <h1 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">SafeChild</h1>
+        <p className="text-slate-500 dark:text-slate-400 mb-8 italic">Professional Child Safety & Educational Coordination</p>
         
         {error && (
-          <div className="mb-6 p-4 bg-red-50 border border-red-100 text-red-600 text-sm rounded-xl">
+          <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-900/30 text-red-600 dark:text-red-400 text-sm rounded-xl">
             {error}
           </div>
         )}
@@ -69,7 +78,7 @@ const Login = () => {
         <button 
           onClick={handleLogin}
           disabled={isLoggingIn}
-          className="w-full py-4 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-all active:scale-95 shadow-lg shadow-blue-100 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="w-full py-4 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-all active:scale-95 shadow-lg shadow-blue-100 dark:shadow-none flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {isLoggingIn ? (
             <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -112,18 +121,15 @@ const VideoCallWrapper = () => {
     <VideoCall 
       appId={import.meta.env.VITE_AGORA_APP_ID} 
       channel={channel} 
+      token={import.meta.env.VITE_AGORA_TOKEN}
       onClose={() => navigate(-1)} 
     />
   );
 };
 import { Sun, Moon } from 'lucide-react';
 
-const Dashboard = () => {
+const Dashboard = ({ isDarkMode, setIsDarkMode }: { isDarkMode: boolean, setIsDarkMode: (v: boolean) => void }) => {
   const { user, profile, loading, isAdmin, isSchoolAdmin, isTeacher, isQuranTeacher, isSportsCoach, isParent, isChild, isAuthorizedPerson, isVisitor, isPending } = useAuth();
-  const [isDarkMode, setIsDarkMode] = useState(() => {
-    const saved = localStorage.getItem('darkMode');
-    return saved ? JSON.parse(saved) : false;
-  });
   const [activeCall, setActiveCall] = useState<{ channel: string } | null>(null);
   const [incomingCall, setIncomingCall] = useState<{ id: string, callerName: string, channel: string } | null>(null);
 
@@ -218,15 +224,6 @@ const Dashboard = () => {
       setShowInstallBanner(false);
     }
   };
-  
-  useEffect(() => {
-    if (isDarkMode) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
-    localStorage.setItem('darkMode', JSON.stringify(isDarkMode));
-  }, [isDarkMode]);
 
   if (loading) return <div className="flex items-center justify-center min-h-screen font-sans text-slate-400 dark:bg-slate-950">Loading...</div>;
   if (!user) return <Navigate to="/" />;
@@ -407,6 +404,7 @@ const Dashboard = () => {
         <VideoCall 
           appId={import.meta.env.VITE_AGORA_APP_ID || ""}
           channel={activeCall.channel}
+          token={import.meta.env.VITE_AGORA_TOKEN}
           onClose={() => setActiveCall(null)}
         />
       )}
@@ -423,6 +421,31 @@ const Dashboard = () => {
 
 export default function App() {
   const [isSplashVisible, setIsSplashVisible] = useState(true);
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    const saved = localStorage.getItem('darkMode');
+    if (saved !== null) return JSON.parse(saved);
+    return window.matchMedia('(prefers-color-scheme: dark)').matches;
+  });
+
+  useEffect(() => {
+    if (isDarkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+    localStorage.setItem('darkMode', JSON.stringify(isDarkMode));
+  }, [isDarkMode]);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const handleChange = (e: MediaQueryListEvent) => {
+      if (localStorage.getItem('darkMode') === null) {
+        setIsDarkMode(e.matches);
+      }
+    };
+    mediaQuery.addEventListener('change', handleChange);
+    return () => mediaQuery.removeEventListener('change', handleChange);
+  }, []);
 
   useEffect(() => {
     const timer = setTimeout(() => setIsSplashVisible(false), 2000);
@@ -431,14 +454,14 @@ export default function App() {
 
   if (isSplashVisible) {
     return (
-      <div className="fixed inset-0 bg-blue-600 flex flex-col items-center justify-center z-[9999]">
+      <div className="fixed inset-0 bg-white dark:bg-slate-950 flex flex-col items-center justify-center z-[9999] transition-colors duration-500">
         <motion.div
           initial={{ scale: 0.8, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           transition={{ duration: 0.5 }}
-          className="w-24 h-24 bg-white rounded-3xl flex items-center justify-center shadow-2xl"
+          className="w-24 h-24 bg-blue-600 rounded-3xl flex items-center justify-center shadow-2xl"
         >
-          <svg className="w-12 h-12 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
           </svg>
         </motion.div>
@@ -446,7 +469,7 @@ export default function App() {
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.3 }}
-          className="mt-6 text-white font-bold text-2xl tracking-tight"
+          className="mt-6 text-slate-900 dark:text-white font-bold text-2xl tracking-tight"
         >
           SafeChild
         </motion.div>
@@ -459,8 +482,8 @@ export default function App() {
       <Router>
         <AnimatePresence mode="wait">
           <Routes>
-            <Route path="/" element={<Login />} />
-            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/" element={<Login isDarkMode={isDarkMode} setIsDarkMode={setIsDarkMode} />} />
+            <Route path="/dashboard" element={<Dashboard isDarkMode={isDarkMode} setIsDarkMode={setIsDarkMode} />} />
           </Routes>
         </AnimatePresence>
       </Router>

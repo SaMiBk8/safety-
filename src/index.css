@@ -13,8 +13,15 @@
 }
 
 @layer base {
-  html, body {
-    @apply overflow-x-hidden;
+  html {
+    @apply antialiased scroll-smooth;
+    @apply bg-slate-50 text-slate-900;
+    @apply dark:bg-slate-950 dark:text-slate-100;
+  }
+  
+  body {
+    @apply transition-colors duration-300;
+    @apply overflow-x-hidden min-h-screen;
     -webkit-tap-highlight-color: transparent;
     user-select: none;
   }

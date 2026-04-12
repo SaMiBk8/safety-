@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { db, storage } from '../../lib/firebase';
 import { doc, updateDoc, addDoc, collection, serverTimestamp, query, where, getDocs } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { ref, uploadBytes, getDownloadURL, uploadBytesResumable } from 'firebase/storage';
 import { motion, AnimatePresence } from 'motion/react';
 import { Shield, Users, GraduationCap, MessageSquare, Send, FileText, Info, CheckCircle2, Clock } from 'lucide-react';
 import { UserRole, School } from '../../types';
@@ -11,7 +11,7 @@ import { handleFirestoreError, OperationType } from '../../lib/firestore-errors'
 import { Chat } from '../Chat';
 
 export const VisitorDashboard: React.FC = () => {
-  const { user, profile } = useAuth();
+  const { user, profile, refreshProfile } = useAuth();
   const [requestedRole, setRequestedRole] = useState<UserRole | ''>('');
   const [message, setMessage] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -20,6 +20,8 @@ export const VisitorDashboard: React.FC = () => {
   const [adminUid, setAdminUid] = useState<string | null>(null);
   const [schools, setSchools] = useState<School[]>([]);
   const [selectedSchoolId, setSelectedSchoolId] = useState('');
+
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
 
   useEffect(() => {
     const fetchSchools = async () => {
@@ -51,12 +53,27 @@ export const VisitorDashboard: React.FC = () => {
     if (!user?.uid || !requestedRole) return;
 
     setIsSubmitting(true);
+    setUploadProgress(0);
     try {
       let fileUrl = null;
       if (selectedFile) {
-        const storageRef = ref(storage, `verification/${user.uid}/${selectedFile.name}`);
-        const snapshot = await uploadBytes(storageRef, selectedFile);
-        fileUrl = await getDownloadURL(snapshot.ref);
+        const storageRef = ref(storage, `verification/${user.uid}/${Date.now()}_${selectedFile.name}`);
+        
+        await new Promise((resolve, reject) => {
+          const uploadTask = uploadBytesResumable(storageRef, selectedFile);
+          
+          uploadTask.on('state_changed', 
+            (snapshot) => {
+              const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+              setUploadProgress(progress);
+            }, 
+            (error) => reject(error), 
+            async () => {
+              fileUrl = await getDownloadURL(uploadTask.snapshot.ref);
+              resolve(fileUrl);
+            }
+          );
+        });
       }
 
       // Update profile with requested role
@@ -82,10 +99,12 @@ export const VisitorDashboard: React.FC = () => {
       });
 
       setSubmitted(true);
+      alert('Request sent successfully!');
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`, user);
     } finally {
       setIsSubmitting(false);
+      setUploadProgress(null);
     }
   };
 
@@ -105,6 +124,14 @@ export const VisitorDashboard: React.FC = () => {
           <p className="text-amber-700 dark:text-amber-300 text-sm mt-1">
             Welcome to SafeChild! Your account is currently in the review queue. An administrator needs to assign your role before you can access the dashboard.
           </p>
+          <div className="mt-4">
+            <button 
+              onClick={refreshProfile}
+              className="px-4 py-2 bg-amber-600 text-white text-xs font-bold rounded-xl hover:bg-amber-700 transition-all shadow-lg shadow-amber-200 dark:shadow-none"
+            >
+              Check Admin Status
+            </button>
+          </div>
         </div>
       </motion.div>
 
@@ -242,10 +269,20 @@ export const VisitorDashboard: React.FC = () => {
                 <button
                   type="submit"
                   disabled={isSubmitting || !requestedRole}
-                  className="w-full py-4 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition-all disabled:opacity-50 flex items-center justify-center gap-2 shadow-xl shadow-blue-100 dark:shadow-none"
+                  className="w-full py-4 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition-all disabled:opacity-50 flex flex-col items-center justify-center gap-1 shadow-xl shadow-blue-100 dark:shadow-none"
                 >
-                  {isSubmitting ? 'Sending...' : 'Send Request'}
-                  <Send className="w-4 h-4" />
+                  <div className="flex items-center gap-2">
+                    {isSubmitting ? 'Sending...' : 'Send Request'}
+                    <Send className="w-4 h-4" />
+                  </div>
+                  {uploadProgress !== null && uploadProgress < 100 && (
+                    <div className="w-full max-w-[200px] h-1 bg-white/20 rounded-full mt-1 overflow-hidden">
+                      <div 
+                        className="h-full bg-white transition-all duration-300" 
+                        style={{ width: `${uploadProgress}%` }}
+                      />
+                    </div>
+                  )}
                 </button>
               </form>
             ) : (

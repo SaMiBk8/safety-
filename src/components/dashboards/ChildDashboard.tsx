@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { collection, query, where, onSnapshot, addDoc, serverTimestamp, doc, updateDoc, getDocs, getDoc } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { collection, query, where, onSnapshot, addDoc, serverTimestamp, doc, updateDoc, getDocs, getDoc, orderBy } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL, uploadBytesResumable } from 'firebase/storage';
 import { db, storage } from '../../lib/firebase';
 import { useAuth } from '../../context/AuthContext';
 import { Student, SOSAlert, Announcement } from '../../types';
 import { motion, AnimatePresence } from 'motion/react';
-import { ShieldAlert, MapPin, Calendar, BookOpen, Clock, X, CheckCircle2, Send, FileText, Megaphone, MessageSquare } from 'lucide-react';
+import { ShieldAlert, MapPin, Calendar, BookOpen, Clock, X, CheckCircle2, Send, FileText, Megaphone, MessageSquare, Star, Trophy, Activity } from 'lucide-react';
 import { handleFirestoreError, OperationType } from '../../lib/firestore-errors';
 
 import { Chat } from '../Chat';
@@ -21,9 +21,29 @@ export const ChildDashboard: React.FC<{ onStartCall?: (channel: string, receiver
   const [selectedContact, setSelectedContact] = useState<{ uid: string, displayName: string } | null>(null);
   const [homeworkTitle, setHomeworkTitle] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [isProcessingFile, setIsProcessingFile] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [teacherProfile, setTeacherProfile] = useState<{ uid: string, name: string } | null>(null);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [unreadTotal, setUnreadTotal] = useState(0);
+  const [grades, setGrades] = useState<any[]>([]);
+  const [quranProgress, setQuranProgress] = useState<any[]>([]);
+  const [sportsTraining, setSportsTraining] = useState<any[]>([]);
+  const [submissions, setSubmissions] = useState<any[]>([]);
+  const [assignments, setAssignments] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (!user?.uid) return;
+    const q = query(
+      collection(db, 'messages'),
+      where('receiverId', '==', user.uid),
+      where('isRead', '==', false)
+    );
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setUnreadTotal(snapshot.size);
+    });
+    return () => unsubscribe();
+  }, [user?.uid]);
 
   useEffect(() => {
     if (!studentData?.schoolId) return;
@@ -53,7 +73,7 @@ export const ChildDashboard: React.FC<{ onStartCall?: (channel: string, receiver
     fetchTeacher();
   }, [studentData]);
 
-  // 1. Fetch student record and update location periodically
+  // 1. Fetch student record
   useEffect(() => {
     if (!user?.uid) return;
 
@@ -66,20 +86,90 @@ export const ChildDashboard: React.FC<{ onStartCall?: (channel: string, receiver
       handleFirestoreError(error, OperationType.LIST, 'students', user || undefined);
     });
 
-    // Use real GPS if available, otherwise fallback to simulation
+    return () => unsubscribeStudent();
+  }, [user?.uid]);
+
+  // 1.5 Fetch Grades, Quran Progress, Sports Training, and Submissions
+  useEffect(() => {
+    if (!studentData?.id) return;
+
+    // Fetch Academic Grades
+    const qGrades = query(
+      collection(db, 'grades'),
+      where('studentId', '==', studentData.id),
+      orderBy('createdAt', 'desc')
+    );
+    const unsubscribeGrades = onSnapshot(qGrades, (snapshot) => {
+      setGrades(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'grades', user || undefined));
+
+    // Fetch Quran Progress
+    const qQuran = query(
+      collection(db, 'quran_progress'),
+      where('studentId', '==', studentData.id),
+      orderBy('createdAt', 'desc')
+    );
+    const unsubscribeQuran = onSnapshot(qQuran, (snapshot) => {
+      setQuranProgress(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'quran_progress', user || undefined));
+
+    // Fetch Sports Training
+    const qSports = query(
+      collection(db, 'sports_training'),
+      where('studentId', '==', studentData.id),
+      orderBy('createdAt', 'desc')
+    );
+    const unsubscribeSports = onSnapshot(qSports, (snapshot) => {
+      setSportsTraining(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'sports_training', user || undefined));
+
+    // Fetch Homework Submissions
+    const qSubmissions = query(
+      collection(db, 'homework_submissions'),
+      where('studentId', '==', studentData.id),
+      orderBy('submittedAt', 'desc')
+    );
+    const unsubscribeSubmissions = onSnapshot(qSubmissions, (snapshot) => {
+      setSubmissions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'homework_submissions', user || undefined));
+
+    // Fetch Assignments
+    const qAssignments = query(
+      collection(db, 'assignments'),
+      where('schoolId', '==', studentData.schoolId),
+      orderBy('createdAt', 'desc')
+    );
+    const unsubscribeAssignments = onSnapshot(qAssignments, (snapshot) => {
+      setAssignments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'assignments', user || undefined));
+
+    return () => {
+      unsubscribeGrades();
+      unsubscribeQuran();
+      unsubscribeSports();
+      unsubscribeSubmissions();
+      unsubscribeAssignments();
+    };
+  }, [studentData?.id, studentData?.schoolId]);
+
+  // 2. Update location periodically
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!studentData?.id) return;
+
     const updateLocation = (lat: number, lng: number) => {
-      if (studentData?.id) {
-        updateDoc(doc(db, 'students', studentData.id), {
-          location: {
-            lat,
-            lng,
-            lastUpdated: serverTimestamp()
-          }
-        }).catch(err => console.error("Location Update Error:", err));
-      }
+      updateDoc(doc(db, 'students', studentData.id), {
+        location: {
+          lat,
+          lng,
+          lastUpdated: serverTimestamp()
+        }
+      }).catch(err => console.error("Location Update Error:", err));
     };
 
     let watchId: number;
+    let interval: any;
 
     if ("geolocation" in navigator) {
       watchId = navigator.geolocation.watchPosition(
@@ -89,25 +179,21 @@ export const ChildDashboard: React.FC<{ onStartCall?: (channel: string, receiver
         (error) => {
           console.error("GPS Error:", error);
         },
-        { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 5000 }
       );
     } else {
-      const interval = setInterval(() => {
+      interval = setInterval(() => {
         const newLat = 34.0522 + (Math.random() - 0.5) * 0.01;
         const newLng = -118.2437 + (Math.random() - 0.5) * 0.01;
         updateLocation(newLat, newLng);
-      }, 10000);
-      return () => {
-        unsubscribeStudent();
-        clearInterval(interval);
-      };
+      }, 30000); // Increased interval to reduce load
     }
 
     return () => {
-      unsubscribeStudent();
       if (watchId) navigator.geolocation.clearWatch(watchId);
+      if (interval) clearInterval(interval);
     };
-  }, [user?.uid, studentData?.id]);
+  }, [studentData?.id]);
 
   const triggerSOS = async () => {
     if (!studentData || isSOSActive) return;
@@ -139,16 +225,33 @@ export const ChildDashboard: React.FC<{ onStartCall?: (channel: string, receiver
       return;
     }
     setIsSubmitting(true);
+    setUploadProgress(0);
     try {
       let fileUrl = null;
       if (selectedFile) {
         const storageRef = ref(storage, `homework/${user?.uid}/${Date.now()}_${selectedFile.name}`);
-        const snapshot = await uploadBytes(storageRef, selectedFile);
-        fileUrl = await getDownloadURL(snapshot.ref);
+        
+        // Use uploadBytesResumable for progress feedback
+        await new Promise((resolve, reject) => {
+          const uploadTask = uploadBytesResumable(storageRef, selectedFile);
+          
+          uploadTask.on('state_changed', 
+            (snapshot) => {
+              const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+              setUploadProgress(progress);
+            }, 
+            (error) => reject(error), 
+            async () => {
+              fileUrl = await getDownloadURL(uploadTask.snapshot.ref);
+              resolve(fileUrl);
+            }
+          );
+        });
       }
 
       await addDoc(collection(db, 'homework_submissions'), {
         studentId: studentData.id,
+        studentName: studentData.name,
         schoolId: studentData.schoolId,
         childUid: user?.uid || '',
         title: homeworkTitle,
@@ -159,11 +262,14 @@ export const ChildDashboard: React.FC<{ onStartCall?: (channel: string, receiver
       });
       setHomeworkTitle('');
       setSelectedFile(null);
+      setUploadProgress(null);
       setActiveModal(null);
+      alert('Homework submitted successfully!');
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'homework_submissions', user || undefined);
     } finally {
       setIsSubmitting(false);
+      setUploadProgress(null);
     }
   };
 
@@ -177,12 +283,31 @@ export const ChildDashboard: React.FC<{ onStartCall?: (channel: string, receiver
         <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900/30 rounded-2xl flex items-center justify-center">
           <MapPin className="w-6 h-6 text-blue-600 dark:text-blue-400" />
         </div>
-        <button 
-          onClick={() => setActiveModal('messenger')}
-          className="w-12 h-12 bg-purple-100 dark:bg-purple-900/30 rounded-2xl flex items-center justify-center hover:bg-purple-200 transition-colors"
-        >
-          <Send className="w-6 h-6 text-purple-600 dark:text-purple-400" />
-        </button>
+        <div className="flex gap-2 relative">
+          <button 
+            onClick={() => setActiveModal('messenger')}
+            className="w-12 h-12 bg-purple-100 dark:bg-purple-900/30 rounded-2xl flex items-center justify-center hover:bg-purple-200 transition-colors relative"
+            title="Open Messenger"
+          >
+            <MessageSquare className="w-6 h-6 text-purple-600 dark:text-purple-400" />
+            {unreadTotal > 0 && (
+              <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-[10px] font-black rounded-full flex items-center justify-center animate-bounce">
+                {unreadTotal}
+              </span>
+            )}
+          </button>
+          {studentData?.parentUid && (
+            <button 
+              onClick={() => {
+                setSelectedContact({ uid: studentData.parentUid, displayName: 'Parent' });
+                setActiveModal('messenger');
+              }}
+              className="px-4 py-2 bg-emerald-600 text-white rounded-xl font-bold text-xs flex items-center gap-2 hover:bg-emerald-700 transition-all"
+            >
+              <Send className="w-4 h-4" /> Message Parent
+            </button>
+          )}
+        </div>
       </header>
 
       {announcements.length > 0 && (
@@ -249,33 +374,167 @@ export const ChildDashboard: React.FC<{ onStartCall?: (channel: string, receiver
 
         {/* Homework Card */}
         <div className="bg-slate-900 dark:bg-slate-950 p-6 rounded-3xl text-white shadow-xl space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="font-bold flex items-center gap-2">
+              <BookOpen className="w-5 h-5 text-blue-400" />
+              Pending Assignments
+            </h3>
+            <button 
+              onClick={() => setActiveModal('homework')}
+              className="px-4 py-2 bg-blue-600 rounded-xl text-xs font-bold hover:bg-blue-700 transition-colors flex items-center gap-2"
+            >
+              <Send className="w-4 h-4" /> Submit Work
+            </button>
+          </div>
+          
+          <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2 scrollbar-hide">
+            {assignments.map((assign) => (
+              <div key={assign.id} className="p-4 bg-white/5 rounded-2xl border border-white/10 space-y-2">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <div className="font-bold text-sm">{assign.title}</div>
+                    <div className="text-[10px] text-slate-400">{assign.teacherName} • {assign.teacherRole?.replace('_', ' ')}</div>
+                  </div>
+                  {assign.dueDate && (
+                    <div className="text-[10px] text-amber-400 flex items-center gap-1">
+                      <Clock className="w-3 h-3" /> {new Date(assign.dueDate.seconds * 1000).toLocaleDateString()}
+                    </div>
+                  )}
+                </div>
+                <p className="text-xs text-slate-300 line-clamp-2">{assign.description}</p>
+              </div>
+            ))}
+            {assignments.length === 0 && (
+              <div className="text-center py-8 text-slate-500 italic text-sm">
+                No pending assignments.
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Submissions History Card */}
+        <div className="bg-slate-900 dark:bg-slate-950 p-6 rounded-3xl text-white shadow-xl space-y-4">
           <h3 className="font-bold flex items-center gap-2">
-            <BookOpen className="w-5 h-5 text-blue-400" />
-            My Homework
+            <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+            My Submissions
+          </h3>
+          
+          <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2 scrollbar-hide">
+            {submissions.map((sub) => (
+              <div key={sub.id} className="p-4 bg-white/5 rounded-2xl border border-white/10 flex items-center justify-between">
+                <div>
+                  <div className="font-bold text-sm">{sub.title}</div>
+                  <div className="text-[10px] text-slate-400 flex items-center gap-1 mt-1">
+                    <Clock className="w-3 h-3" /> {sub.submittedAt?.toDate().toLocaleDateString()}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className={`text-[8px] font-black uppercase px-2 py-1 rounded-full ${
+                    sub.status === 'pending' ? 'bg-amber-500/20 text-amber-400' : 'bg-emerald-500/20 text-emerald-400'
+                  }`}>
+                    {sub.status}
+                  </span>
+                  {sub.fileUrl && (
+                    <a href={sub.fileUrl} target="_blank" rel="noreferrer" className="p-2 bg-white/10 rounded-lg hover:bg-white/20 transition-colors">
+                      <FileText className="w-3 h-3 text-blue-400" />
+                    </a>
+                  )}
+                </div>
+              </div>
+            ))}
+            {submissions.length === 0 && (
+              <div className="text-center py-8 text-slate-500 italic text-sm">
+                No work submitted yet.
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Results & Progress Section */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Academic Grades */}
+        <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm space-y-4">
+          <h3 className="font-bold text-slate-900 dark:text-white flex items-center gap-2">
+            <Trophy className="w-5 h-5 text-amber-500" />
+            Academic Grades
           </h3>
           <div className="space-y-3">
-            <div className="p-4 bg-white/5 rounded-2xl border border-white/10 flex items-center justify-between">
-              <div>
-                <div className="font-bold text-sm">History Essay</div>
-                <div className="text-[10px] text-slate-400 flex items-center gap-1 mt-1">
-                  <Clock className="w-3 h-3" /> Due Tomorrow
+            {grades.map((g) => (
+              <div key={g.id} className="p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-800">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <div className="text-lg font-black text-blue-600">{g.grade}</div>
+                    <div className="text-xs text-slate-500 mt-1">{g.comment}</div>
+                  </div>
+                  <div className="text-[10px] text-slate-400">{g.createdAt?.toDate().toLocaleDateString()}</div>
                 </div>
+                {g.behavior && (
+                  <div className="mt-2 flex items-center gap-1">
+                    <span className="text-[8px] font-black uppercase text-slate-400">Behavior:</span>
+                    <span className="text-[8px] font-black uppercase text-emerald-600">{g.behavior}</span>
+                  </div>
+                )}
               </div>
-              <button 
-                onClick={() => setActiveModal('homework')}
-                className="px-3 py-1 bg-blue-600 rounded-lg text-[10px] font-bold hover:bg-blue-700 transition-colors"
-              >
-                Submit
-              </button>
-            </div>
-            <div className="p-4 bg-white/5 rounded-2xl border border-white/10 flex items-center justify-between opacity-50">
-              <div>
-                <div className="font-bold text-sm">Math Exercises</div>
-                <div className="text-[10px] text-emerald-400 flex items-center gap-1 mt-1">
-                  Completed
+            ))}
+            {grades.length === 0 && (
+              <p className="text-center text-xs text-slate-400 italic py-4">No grades posted yet.</p>
+            )}
+          </div>
+        </div>
+
+        {/* Quran Progress */}
+        <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm space-y-4">
+          <h3 className="font-bold text-slate-900 dark:text-white flex items-center gap-2">
+            <Star className="w-5 h-5 text-emerald-500" />
+            Quran Progress
+          </h3>
+          <div className="space-y-3">
+            {quranProgress.map((p) => (
+              <div key={p.id} className="p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-800">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <div className="font-bold text-slate-900 dark:text-white text-sm">Surah {p.surah}</div>
+                    <div className="text-[10px] text-slate-500">Ayah: {p.ayah}</div>
+                  </div>
+                  <div className="flex gap-0.5">
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <Star key={star} className={`w-3 h-3 ${star <= p.rating ? 'text-amber-400 fill-amber-400' : 'text-slate-200'}`} />
+                    ))}
+                  </div>
                 </div>
+                {p.notes && <p className="text-xs text-slate-500 mt-2 italic">"{p.notes}"</p>}
+                <div className="text-[10px] text-slate-400 mt-2">{p.createdAt?.toDate().toLocaleDateString()}</div>
               </div>
-            </div>
+            ))}
+            {quranProgress.length === 0 && (
+              <p className="text-center text-xs text-slate-400 italic py-4">No Quran progress logs yet.</p>
+            )}
+          </div>
+        </div>
+
+        {/* Sports Training */}
+        <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm space-y-4">
+          <h3 className="font-bold text-slate-900 dark:text-white flex items-center gap-2">
+            <Activity className="w-5 h-5 text-blue-500" />
+            Sports Training
+          </h3>
+          <div className="space-y-3">
+            {sportsTraining.map((t) => (
+              <div key={t.id} className="p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-800">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <div className="font-bold text-slate-900 dark:text-white text-sm">{t.exercise}</div>
+                    <div className="text-[10px] text-slate-500">{t.duration} mins • {t.intensity} intensity</div>
+                  </div>
+                  <div className="text-[10px] text-slate-400">{t.createdAt?.toDate().toLocaleDateString()}</div>
+                </div>
+                {t.notes && <p className="text-xs text-slate-500 mt-2 italic">"{t.notes}"</p>}
+              </div>
+            ))}
+            {sportsTraining.length === 0 && (
+              <p className="text-center text-xs text-slate-400 italic py-4">No training logs yet.</p>
+            )}
           </div>
         </div>
       </div>
@@ -317,44 +576,71 @@ export const ChildDashboard: React.FC<{ onStartCall?: (channel: string, receiver
                   </div>
                   <div className="space-y-2">
                     <label className="block text-sm font-bold text-slate-500 mb-2">Upload Files (Optional)</label>
-                    <input 
-                      type="file" 
-                      id="homework-upload" 
-                      className="hidden" 
-                      onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
-                    />
-                    <label 
-                      htmlFor="homework-upload"
-                      className={`p-6 border-2 border-dashed rounded-3xl text-center cursor-pointer transition-all block ${
-                        selectedFile 
-                          ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20' 
-                          : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800'
-                      }`}
-                    >
-                      {selectedFile ? (
-                        <>
-                          <CheckCircle2 className="w-8 h-8 text-emerald-600 mx-auto mb-2" />
-                          <p className="text-xs text-emerald-600 font-bold">{selectedFile.name}</p>
-                        </>
-                      ) : (
-                        <>
-                          <Send className="w-8 h-8 text-slate-400 mx-auto mb-2" />
-                          <p className="text-xs text-slate-400">Click to upload files or drag and drop</p>
-                        </>
-                      )}
-                    </label>
+                    <div className="relative">
+                      <input 
+                        type="file" 
+                        id="homework-upload" 
+                        className="hidden" 
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            setIsProcessingFile(true);
+                            // Small delay to prevent UI freeze during file handle
+                            setTimeout(() => {
+                              setSelectedFile(file);
+                              setIsProcessingFile(false);
+                            }, 100);
+                          }
+                        }}
+                      />
+                      <label 
+                        htmlFor="homework-upload"
+                        className={`p-6 border-2 border-dashed rounded-3xl text-center cursor-pointer transition-all block ${
+                          selectedFile 
+                            ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20' 
+                            : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800'
+                        }`}
+                      >
+                        {isProcessingFile ? (
+                          <div className="flex flex-col items-center gap-2">
+                            <div className="w-8 h-8 border-4 border-blue-600/30 border-t-blue-600 rounded-full animate-spin mx-auto" />
+                            <p className="text-xs text-blue-600 font-bold">Processing...</p>
+                          </div>
+                        ) : selectedFile ? (
+                          <>
+                            <CheckCircle2 className="w-8 h-8 text-emerald-600 mx-auto mb-2" />
+                            <p className="text-xs text-emerald-600 font-bold">{selectedFile.name}</p>
+                          </>
+                        ) : (
+                          <>
+                            <Send className="w-8 h-8 text-slate-400 mx-auto mb-2" />
+                            <p className="text-xs text-slate-400">Click to upload files or drag and drop</p>
+                          </>
+                        )}
+                      </label>
+                    </div>
                   </div>
                   <button 
                     onClick={handleHomeworkSubmit}
-                    disabled={!homeworkTitle || isSubmitting}
-                    className="w-full py-4 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                    disabled={!homeworkTitle || isSubmitting || !studentData?.id}
+                    className="w-full py-4 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition-all disabled:opacity-50 flex flex-col items-center justify-center gap-1"
                   >
-                    {isSubmitting ? (
-                      <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    ) : (
-                      <CheckCircle2 className="w-5 h-5" />
+                    <div className="flex items-center gap-2">
+                      {isSubmitting ? (
+                        <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      ) : (
+                        <CheckCircle2 className="w-5 h-5" />
+                      )}
+                      {isSubmitting ? 'Submitting...' : 'Submit to Teacher'}
+                    </div>
+                    {uploadProgress !== null && uploadProgress < 100 && (
+                      <div className="w-full max-w-[200px] h-1 bg-white/20 rounded-full mt-2 overflow-hidden">
+                        <div 
+                          className="h-full bg-white transition-all duration-300" 
+                          style={{ width: `${uploadProgress}%` }}
+                        />
+                      </div>
                     )}
-                    {isSubmitting ? 'Submitting...' : 'Submit to Teacher'}
                   </button>
                 </div>
               </div>

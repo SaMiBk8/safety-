@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { collection, query, where, onSnapshot, addDoc, serverTimestamp, orderBy } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, addDoc, serverTimestamp, orderBy, updateDoc, doc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
 import { Send, User } from 'lucide-react';
@@ -40,7 +40,20 @@ export const Chat: React.FC<ChatProps> = ({ receiverId, receiverName, roomId }) 
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      setMessages(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Message)));
+      const newMessages = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Message));
+      setMessages(newMessages);
+
+      // Mark unread messages as read
+      snapshot.docs.forEach(async (docSnap) => {
+        const data = docSnap.data();
+        if (data.receiverId === user.uid && !data.isRead) {
+          try {
+            await updateDoc(doc(db, 'messages', docSnap.id), { isRead: true });
+          } catch (e) {
+            console.error("Error marking message as read:", e);
+          }
+        }
+      });
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'messages', user);
     });
@@ -67,6 +80,7 @@ export const Chat: React.FC<ChatProps> = ({ receiverId, receiverName, roomId }) 
         receiverId,
         text: newMessage,
         createdAt: serverTimestamp(),
+        isRead: false,
       });
       setNewMessage('');
     } catch (error) {

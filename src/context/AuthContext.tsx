@@ -19,16 +19,56 @@ interface AuthContextType {
   isAuthorizedPerson: boolean;
   isVisitor: boolean;
   isPending: boolean;
+  refreshProfile: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const PRIMARY_ADMIN_EMAILS = ["bsami0004bsami@gmail.com", "bsami04bsami@gmail.com", "www.samibook43@gmail.com", "sbou91752@gmail.com"];
+const PRIMARY_ADMIN_EMAILS = ["bsami0004bsami@gmail.com", "bsami04bsami@gmail.com", "www.samibook43@gmail.com", "sbou91752@gmail.com", "mycat00101@gmail.com", "sami.boukheche.etu@centre-univ-mila.dz", "samiboo8324@gmail.com"];
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  
+  const refreshProfile = async () => {
+    if (!user) return;
+    setIsRefreshing(true);
+    try {
+      const profileRef = doc(db, 'users', user.uid);
+      const docSnap = await getDoc(profileRef);
+      const userEmail = user.email?.toLowerCase();
+      const isPrimaryAdmin = userEmail && PRIMARY_ADMIN_EMAILS.map(e => e.toLowerCase()).includes(userEmail);
+      
+      if (isPrimaryAdmin) {
+        if (!docSnap.exists()) {
+          await setDoc(profileRef, {
+            uid: user.uid,
+            email: user.email || '',
+            displayName: user.displayName || '',
+            status: 'active',
+            role: 'system_admin',
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          });
+        } else if (isPrimaryAdmin) {
+          const currentRole = docSnap.data()?.role;
+          if (!currentRole || currentRole === 'visitor') {
+            await setDoc(profileRef, {
+              role: 'system_admin',
+              status: 'active',
+              updatedAt: serverTimestamp()
+            }, { merge: true });
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Manual refresh failed:', error);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   useEffect(() => {
     let unsubProfile: (() => void) | null = null;
@@ -47,8 +87,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // Initial check and creation if needed
         try {
           const docSnap = await getDoc(profileRef);
-          const isPrimaryAdmin = firebaseUser.email && PRIMARY_ADMIN_EMAILS.includes(firebaseUser.email);
+          const userEmail = firebaseUser.email?.toLowerCase();
+          const isPrimaryAdmin = userEmail && PRIMARY_ADMIN_EMAILS.map(e => e.toLowerCase()).includes(userEmail);
           
+          console.log('Auth Check:', { email: userEmail, isPrimaryAdmin });
+
           if (!docSnap.exists()) {
             const newProfile: any = {
               uid: firebaseUser.uid,
@@ -60,14 +103,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               role: isPrimaryAdmin ? 'system_admin' : 'visitor'
             };
             
+            console.log('Creating new profile:', newProfile);
             await setDoc(profileRef, newProfile);
           } else {
             const currentProfile = docSnap.data() as UserProfile;
-            if (isPrimaryAdmin && currentProfile.role !== 'system_admin') {
-              await updateDoc(profileRef, {
+            // Only auto-upgrade if they are a visitor or have no role
+            const canUpgrade = !currentProfile.role || currentProfile.role === 'visitor';
+            if (isPrimaryAdmin && canUpgrade) {
+              console.log('Upgrading existing profile to admin');
+              await setDoc(profileRef, {
                 role: 'system_admin',
+                status: 'active',
                 updatedAt: serverTimestamp()
-              });
+              }, { merge: true });
             }
           }
         } catch (error) {
@@ -112,6 +160,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     isAuthorizedPerson: profile?.role === 'authorized_person',
     isVisitor: profile?.role === 'visitor' || !profile?.role,
     isPending: profile?.status === 'pending',
+    refreshProfile,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

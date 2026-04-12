@@ -125,6 +125,23 @@
       },
       "required": ["id", "studentId", "teacherId", "grade", "createdAt"]
     },
+    "Assignment": {
+      "title": "Assignment",
+      "description": "Work assigned to students by teachers",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "schoolId": { "type": "string" },
+        "teacherId": { "type": "string" },
+        "teacherName": { "type": "string" },
+        "teacherRole": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "dueDate": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "schoolId", "teacherId", "title", "description", "createdAt"]
+    },
     "HomeworkSubmission": {
       "title": "Homework Submission",
       "description": "Homework submitted by students",
@@ -203,6 +220,10 @@
     "/grades/{gradeId}": {
       "schema": "Grade",
       "description": "Academic grades"
+    },
+    "/assignments/{assignmentId}": {
+      "schema": "Assignment",
+      "description": "Work assigned to students"
     },
     "/homework_submissions/{submissionId}": {
       "schema": "HomeworkSubmission",

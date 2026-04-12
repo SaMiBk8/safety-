@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { collection, query, where, onSnapshot, getDocs } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, getDocs, orderBy, getDoc, doc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
 import { UserProfile, Student } from '../types';
@@ -12,6 +12,7 @@ interface Contact {
   role: string;
   email: string;
   studentName?: string;
+  unreadCount?: number;
 }
 
 interface ContactListProps {
@@ -24,9 +25,31 @@ export const ContactList: React.FC<ContactListProps> = ({ onSelect, selectedId }
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
+  const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
 
   useEffect(() => {
-    if (!profile?.schoolId) {
+    if (!profile?.uid) return;
+
+    const q = query(
+      collection(db, 'messages'),
+      where('receiverId', '==', profile.uid),
+      where('isRead', '==', false)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const counts: Record<string, number> = {};
+      snapshot.docs.forEach(doc => {
+        const data = doc.data();
+        counts[data.senderId] = (counts[data.senderId] || 0) + 1;
+      });
+      setUnreadCounts(counts);
+    });
+
+    return () => unsubscribe();
+  }, [profile?.uid]);
+
+  useEffect(() => {
+    if (!profile?.uid) {
       setLoading(false);
       return;
     }
@@ -34,12 +57,39 @@ export const ContactList: React.FC<ContactListProps> = ({ onSelect, selectedId }
     const fetchContacts = async () => {
       try {
         let contactList: Contact[] = [];
+        
+        // Fetch recent chat participants
+        const messagesQ = query(
+          collection(db, 'messages'),
+          where('participants', 'array-contains', profile.uid),
+          orderBy('createdAt', 'desc')
+        );
+        const messagesSnap = await getDocs(messagesQ);
+        const recentParticipantIds = Array.from(new Set(
+          messagesSnap.docs.flatMap(doc => doc.data().participants).filter(id => id !== profile.uid)
+        )) as string[];
+
+        const recentParticipantsSnap = await Promise.all(
+          recentParticipantIds.map(id => getDoc(doc(db, 'users', id)))
+        );
+        
+        const recentContacts: Contact[] = recentParticipantsSnap
+          .filter(d => d.exists())
+          .map(d => {
+            const data = d.data();
+            return {
+              uid: d.id,
+              displayName: data?.displayName || data?.email || 'User',
+              role: data?.role || 'user',
+              email: data?.email || ''
+            };
+          });
 
         if (profile.role === 'school_admin' || profile.role === 'system_admin') {
           // Admins see everyone in the school
           const q = query(collection(db, 'users'), where('schoolId', '==', profile.schoolId));
           const snap = await getDocs(q);
-          contactList = snap.docs
+          const allUsers = snap.docs
             .map(doc => ({ uid: doc.id, ...doc.data() } as any))
             .filter(u => u.uid !== profile.uid)
             .map(u => ({
@@ -48,6 +98,7 @@ export const ContactList: React.FC<ContactListProps> = ({ onSelect, selectedId }
               role: u.role,
               email: u.email
             }));
+          contactList = allUsers;
         } else if (profile.role === 'teacher' || profile.role === 'quran_teacher' || profile.role === 'sports_coach') {
           // Teachers see parents of their students and other staff
           const studentsQ = query(collection(db, 'students'), where('schoolId', '==', profile.schoolId));
@@ -73,18 +124,20 @@ export const ContactList: React.FC<ContactListProps> = ({ onSelect, selectedId }
               email: u.email
             }));
 
-          const parentsSnap = await Promise.all(parentIds.map(id => getDocs(query(collection(db, 'users'), where('uid', '==', id)))));
-          const parentsList = parentsSnap.flatMap(snap => snap.docs.map(doc => {
-            const data = doc.data();
-            const student = studentData.find(s => s.parentUid === doc.id);
-            return {
-              uid: doc.id,
-              displayName: data.displayName || data.email,
-              role: 'parent',
-              email: data.email,
-              studentName: student?.name
-            };
-          }));
+          const parentsSnap = await Promise.all(parentIds.map(id => getDoc(doc(db, 'users', id))));
+          const parentsList = parentsSnap
+            .filter(d => d.exists())
+            .map(doc => {
+              const data = doc.data();
+              const student = studentData.find(s => s.parentUid === doc.id);
+              return {
+                uid: doc.id,
+                displayName: data?.displayName || data?.email || 'Parent',
+                role: 'parent',
+                email: data?.email || '',
+                studentName: student?.name
+              };
+            });
 
           const childrenList = studentData
             .filter(s => s.childUid)
@@ -104,16 +157,18 @@ export const ContactList: React.FC<ContactListProps> = ({ onSelect, selectedId }
           
           const teacherIds = Array.from(new Set(studentData.map(s => s.teacherId).filter(Boolean))) as string[];
           
-          const teachersSnap = await Promise.all(teacherIds.map(id => getDocs(query(collection(db, 'users'), where('uid', '==', id)))));
-          const teachersList = teachersSnap.flatMap(snap => snap.docs.map(doc => {
-            const data = doc.data();
-            return {
-              uid: doc.id,
-              displayName: data.displayName || data.email,
-              role: data.role,
-              email: data.email
-            };
-          }));
+          const teachersSnap = await Promise.all(teacherIds.map(id => getDoc(doc(db, 'users', id))));
+          const teachersList = teachersSnap
+            .filter(d => d.exists())
+            .map(doc => {
+              const data = doc.data();
+              return {
+                uid: doc.id,
+                displayName: data?.displayName || data?.email || 'Teacher',
+                role: data?.role || 'teacher',
+                email: data?.email || ''
+              };
+            });
 
           const adminQ = query(collection(db, 'users'), where('schoolId', '==', profile.schoolId), where('role', '==', 'school_admin'));
           const adminSnap = await getDocs(adminQ);
@@ -138,27 +193,47 @@ export const ContactList: React.FC<ContactListProps> = ({ onSelect, selectedId }
 
           contactList = [...teachersList, ...adminList, ...childrenList];
         } else if (profile.role === 'child') {
-          // Children see their teacher
+          // Children see their teacher and their parent
           const studentsQ = query(collection(db, 'students'), where('childUid', '==', profile.uid));
           const studentsSnap = await getDocs(studentsQ);
           if (!studentsSnap.empty) {
             const student = studentsSnap.docs[0].data() as Student;
+            let teacherList: Contact[] = [];
+            let parentList: Contact[] = [];
+
             if (student.teacherId) {
-              const teacherSnap = await getDocs(query(collection(db, 'users'), where('uid', '==', student.teacherId)));
-              contactList = teacherSnap.docs.map(doc => {
-                const data = doc.data();
-                return {
-                  uid: doc.id,
+              const teacherDoc = await getDoc(doc(db, 'users', student.teacherId));
+              if (teacherDoc.exists()) {
+                const data = teacherDoc.data();
+                teacherList = [{
+                  uid: teacherDoc.id,
                   displayName: data.displayName || data.email,
                   role: data.role,
                   email: data.email
-                };
-              });
+                }];
+              }
             }
+
+            if (student.parentUid) {
+              const parentDoc = await getDoc(doc(db, 'users', student.parentUid));
+              if (parentDoc.exists()) {
+                const data = parentDoc.data();
+                parentList = [{
+                  uid: parentDoc.id,
+                  displayName: data.displayName || data.email,
+                  role: 'parent',
+                  email: data.email
+                }];
+              }
+            }
+            contactList = [...teacherList, ...parentList];
           }
         }
 
-        setContacts(contactList);
+        // Merge and deduplicate
+        const merged = [...recentContacts, ...contactList];
+        const unique = Array.from(new Map(merged.map(c => [c.uid, c])).values());
+        setContacts(unique);
       } catch (error) {
         handleFirestoreError(error, OperationType.LIST, 'users', user || undefined);
       } finally {
@@ -210,8 +285,13 @@ export const ContactList: React.FC<ContactListProps> = ({ onSelect, selectedId }
               {contact.displayName[0].toUpperCase()}
             </div>
             <div className="text-left flex-1 min-w-0">
-              <div className="font-bold text-slate-900 dark:text-white truncate text-sm">
+              <div className="font-bold text-slate-900 dark:text-white truncate text-sm flex items-center gap-2">
                 {contact.displayName}
+                {unreadCounts[contact.uid] > 0 && (
+                  <span className="bg-red-500 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full animate-bounce">
+                    {unreadCounts[contact.uid]}
+                  </span>
+                )}
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-[10px] font-black uppercase text-slate-400 truncate">

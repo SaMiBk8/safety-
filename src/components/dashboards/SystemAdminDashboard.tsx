@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { collection, onSnapshot, doc, updateDoc, query, orderBy, deleteDoc, setDoc, arrayUnion, serverTimestamp } from 'firebase/firestore';
+import { collection, onSnapshot, doc, updateDoc, query, orderBy, deleteDoc, setDoc, arrayUnion, serverTimestamp, getDocs, where } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useAuth } from '../../context/AuthContext';
 import { UserProfile, School } from '../../types';
 import { motion, AnimatePresence } from 'motion/react';
-import { Shield, UserX, UserCheck, Search, MessageSquare, Clock, CheckCircle2, X, FileText } from 'lucide-react';
+import { Shield, UserX, UserCheck, Search, MessageSquare, Clock, CheckCircle2, X, FileText, Trash2, Users, Plus, AlertCircle } from 'lucide-react';
 import { handleFirestoreError, OperationType } from '../../lib/firestore-errors';
 
 interface VisitorMessage {
@@ -36,12 +36,29 @@ export const SystemAdminDashboard: React.FC = () => {
   const [isDeletingSelected, setIsDeletingSelected] = useState(false);
   const [chatUser, setChatUser] = useState<{ uid: string, name: string } | null>(null);
   const [isCleaning, setIsCleaning] = useState(false);
+  const [isCleaningMessages, setIsCleaningMessages] = useState(false);
   const [showCleanupConfirm, setShowCleanupConfirm] = useState(false);
+  const [showCleanupMessagesConfirm, setShowCleanupMessagesConfirm] = useState(false);
+  const [selectedFeedback, setSelectedFeedback] = useState<any | null>(null);
+  const [unreadPrivateCount, setUnreadPrivateCount] = useState(0);
+
+  useEffect(() => {
+    if (!user?.uid) return;
+    const q = query(
+      collection(db, 'messages'),
+      where('receiverId', '==', user.uid),
+      where('isRead', '==', false)
+    );
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setUnreadPrivateCount(snapshot.size);
+    });
+    return () => unsubscribe();
+  }, [user?.uid]);
 
   useEffect(() => {
     const q = query(collection(db, 'users'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const userList = snapshot.docs.map(doc => doc.data() as UserProfile);
+      const userList = snapshot.docs.map(doc => ({ ...doc.data(), uid: doc.id } as UserProfile));
       setUsers(userList);
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'users', user || undefined);
@@ -113,48 +130,81 @@ export const SystemAdminDashboard: React.FC = () => {
     setIsCleaning(true);
     try {
       const nonAdmins = users.filter(u => u.role !== 'system_admin');
-      const resetPromises = nonAdmins.map(u => updateDoc(doc(db, 'users', u.uid), {
-        role: 'visitor',
-        status: 'active',
-        schoolId: null,
-        requestedRole: null,
-        requestMessage: null,
-        parentId: null,
-        childIds: [],
-        authorizedBy: null,
-        updatedAt: serverTimestamp()
-      }));
-      await Promise.all(resetPromises);
+      const deletePromises = nonAdmins.map(u => deleteDoc(doc(db, 'users', u.uid)));
+      await Promise.all(deletePromises);
       setShowCleanupConfirm(false);
       setSelectedUserIds([]);
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, 'users', user || undefined);
+      handleFirestoreError(error, OperationType.DELETE, 'users', user || undefined);
     } finally {
       setIsCleaning(false);
     }
   };
 
+  const cleanupMessages = async () => {
+    setIsCleaningMessages(true);
+    try {
+      const messagesSnap = await getDocs(collection(db, 'messages'));
+      const deletePromises = messagesSnap.docs.map(d => deleteDoc(d.ref));
+      await Promise.all(deletePromises);
+      setShowCleanupMessagesConfirm(false);
+      alert('All chat messages have been deleted.');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, 'messages', user || undefined);
+    } finally {
+      setIsCleaningMessages(false);
+    }
+  };
+
   const deleteSelectedUsers = async () => {
     if (selectedUserIds.length === 0) return;
+    
+    const idsToDelete = selectedUserIds.filter(id => id !== user?.uid);
+    if (idsToDelete.length === 0) {
+      alert('You cannot delete your own account.');
+      return;
+    }
+
+    console.log('Attempting to delete selected users:', idsToDelete);
+    if (!window.confirm(`Are you sure you want to permanently delete ${idsToDelete.length} accounts? This action cannot be undone.`)) return;
+    
     setIsDeletingSelected(true);
     try {
-      const resetPromises = selectedUserIds.map(uid => updateDoc(doc(db, 'users', uid), {
-        role: 'visitor',
-        status: 'active',
-        schoolId: null,
-        requestedRole: null,
-        requestMessage: null,
-        parentId: null,
-        childIds: [],
-        authorizedBy: null,
-        updatedAt: serverTimestamp()
-      }));
-      await Promise.all(resetPromises);
+      const deletePromises = idsToDelete.map(uid => {
+        console.log('Deleting user:', uid);
+        return deleteDoc(doc(db, 'users', uid));
+      });
+      await Promise.all(deletePromises);
+      console.log('Successfully deleted selected users');
       setSelectedUserIds([]);
+      alert(`Successfully deleted ${idsToDelete.length} accounts.`);
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, 'users', user || undefined);
+      console.error('Delete selected users failed:', error);
+      handleFirestoreError(error, OperationType.DELETE, 'users', user || undefined);
     } finally {
       setIsDeletingSelected(false);
+    }
+  };
+
+  const deleteUser = async (uid: string) => {
+    if (uid === user?.uid) {
+      alert('You cannot delete your own account.');
+      return;
+    }
+    
+    console.log('Attempting to delete user:', uid);
+    if (!uid) {
+      console.error('No UID provided for deletion');
+      return;
+    }
+    if (!window.confirm('Are you sure you want to permanently delete this account? This action cannot be undone.')) return;
+    try {
+      await deleteDoc(doc(db, 'users', uid));
+      console.log('Successfully deleted user:', uid);
+      alert('Account successfully deleted.');
+    } catch (error) {
+      console.error('Delete user failed:', error);
+      handleFirestoreError(error, OperationType.DELETE, `users/${uid}`, user || undefined);
     }
   };
 
@@ -239,7 +289,7 @@ export const SystemAdminDashboard: React.FC = () => {
               ) : (
                 <UserX className="w-4 h-4" />
               )}
-              Reset Selected ({selectedUserIds.length})
+              Delete Selected ({selectedUserIds.length})
             </button>
           )}
           <button 
@@ -247,7 +297,14 @@ export const SystemAdminDashboard: React.FC = () => {
             className="flex items-center gap-2 px-4 py-2 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-xl text-sm font-bold hover:bg-red-100 transition-colors"
           >
             <UserX className="w-4 h-4" />
-            Reset All Non-Admins
+            Delete All Non-Admins
+          </button>
+          <button 
+            onClick={() => setShowCleanupMessagesConfirm(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 rounded-xl text-sm font-bold hover:bg-amber-100 transition-colors"
+          >
+            <MessageSquare className="w-4 h-4" />
+            Delete All Messages
           </button>
           <div className="bg-blue-100 dark:bg-blue-900/30 p-3 rounded-2xl">
             <Shield className="w-6 h-6 text-blue-600 dark:text-blue-400" />
@@ -286,8 +343,10 @@ export const SystemAdminDashboard: React.FC = () => {
           }`}
         >
           Visitor Requests
-          {messages.filter(m => m.status === 'unread').length > 0 && (
-            <span className="w-2 h-2 bg-red-500 rounded-full" />
+          {(messages.filter(m => m.status === 'unread').length > 0 || unreadPrivateCount > 0) && (
+            <span className="bg-red-500 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full animate-bounce">
+              {messages.filter(m => m.status === 'unread').length + unreadPrivateCount}
+            </span>
           )}
           {activeTab === 'messages' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
         </button>
@@ -415,15 +474,24 @@ export const SystemAdminDashboard: React.FC = () => {
                       </span>
                     </td>
                     <td className="p-4 text-right">
-                      <button 
-                        onClick={() => toggleUserStatus(user.uid, user.status)}
-                        className={`p-2 rounded-lg transition-colors ${
-                          user.status === 'active' ? 'text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20' : 'text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20'
-                        }`}
-                        title={user.status === 'active' ? 'Block User' : 'Unblock User'}
-                      >
-                        {user.status === 'active' ? <UserX className="w-5 h-5" /> : <UserCheck className="w-5 h-5" />}
-                      </button>
+                      <div className="flex items-center justify-end gap-2">
+                        <button 
+                          onClick={() => toggleUserStatus(user.uid, user.status)}
+                          className={`p-2 rounded-lg transition-colors ${
+                            user.status === 'active' ? 'text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20' : 'text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20'
+                          }`}
+                          title={user.status === 'active' ? 'Block User' : 'Unblock User'}
+                        >
+                          {user.status === 'active' ? <UserX className="w-5 h-5" /> : <UserCheck className="w-5 h-5" />}
+                        </button>
+                        <button 
+                          onClick={() => deleteUser(user.uid)}
+                          className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                          title="Delete Account"
+                        >
+                          <Trash2 className="w-5 h-5" />
+                        </button>
+                      </div>
                     </td>
                   </motion.tr>
                 ))}
@@ -684,7 +752,11 @@ export const SystemAdminDashboard: React.FC = () => {
               </thead>
               <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
                 {feedbacks.map((fb) => (
-                  <tr key={fb.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors">
+                  <tr 
+                    key={fb.id} 
+                    className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors cursor-pointer"
+                    onClick={() => setSelectedFeedback(fb)}
+                  >
                     <td className="p-4">
                       <div className="font-bold text-slate-900 dark:text-white text-sm">{fb.fromName}</div>
                       <div className="text-[10px] text-slate-400">{fb.fromUid}</div>
@@ -836,7 +908,7 @@ export const SystemAdminDashboard: React.FC = () => {
                 </div>
                 <h3 className="text-xl font-black text-slate-900 dark:text-white">Dangerous Action</h3>
                 <p className="text-slate-500 dark:text-slate-400">
-                  This will reset all accounts that are not System Administrators to Visitor status. This action cannot be undone.
+                  This will permanently delete all accounts that are not System Administrators. This action cannot be undone.
                 </p>
                 <div className="flex gap-3 pt-4">
                   <button 
@@ -854,13 +926,138 @@ export const SystemAdminDashboard: React.FC = () => {
                     {isCleaning ? (
                       <>
                         <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                        Resetting...
+                        Deleting...
                       </>
                     ) : (
-                      'Reset All'
+                      'Delete All'
                     )}
                   </button>
                 </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Cleanup Messages Confirmation Modal */}
+      <AnimatePresence>
+        {showCleanupMessagesConfirm && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => !isCleaningMessages && setShowCleanupMessagesConfirm(false)}
+              className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="relative bg-white dark:bg-slate-900 w-full max-w-md rounded-[2.5rem] shadow-2xl overflow-hidden p-8"
+            >
+              <div className="text-center space-y-4">
+                <div className="w-16 h-16 bg-amber-100 dark:bg-amber-900/30 rounded-full flex items-center justify-center mx-auto">
+                  <MessageSquare className="w-8 h-8 text-amber-600 dark:text-amber-400" />
+                </div>
+                <h3 className="text-xl font-black text-slate-900 dark:text-white">Delete All Messages?</h3>
+                <p className="text-slate-500 dark:text-slate-400">
+                  This will permanently delete all chat history across the entire platform. This action cannot be undone.
+                </p>
+                <div className="flex gap-3 pt-4">
+                  <button 
+                    disabled={isCleaningMessages}
+                    onClick={() => setShowCleanupMessagesConfirm(false)}
+                    className="flex-1 px-6 py-3 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-2xl font-bold hover:bg-slate-200 transition-colors disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    disabled={isCleaningMessages}
+                    onClick={cleanupMessages}
+                    className="flex-1 px-6 py-3 bg-amber-600 text-white rounded-2xl font-bold hover:bg-amber-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {isCleaningMessages ? (
+                      <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    ) : (
+                      'Delete All'
+                    )}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Feedback Detail Modal */}
+      <AnimatePresence>
+        {selectedFeedback && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setSelectedFeedback(null)}
+              className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="relative bg-white dark:bg-slate-900 w-full max-w-lg rounded-[2.5rem] shadow-2xl overflow-hidden p-8"
+            >
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-xl font-black text-slate-900 dark:text-white">Feedback Details</h3>
+                <button onClick={() => setSelectedFeedback(null)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors">
+                  <X className="w-6 h-6 text-slate-400" />
+                </button>
+              </div>
+              
+              <div className="space-y-6">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl">
+                    <span className="text-[10px] font-black text-slate-400 uppercase block mb-1">From</span>
+                    <div className="font-bold text-slate-900 dark:text-white">{selectedFeedback.fromName}</div>
+                    <div className="text-[10px] text-slate-500 truncate">{selectedFeedback.fromUid}</div>
+                  </div>
+                  <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl">
+                    <span className="text-[10px] font-black text-slate-400 uppercase block mb-1">To</span>
+                    <div className="font-bold text-slate-900 dark:text-white">{selectedFeedback.toName}</div>
+                    <div className="text-[10px] text-slate-500 truncate">{selectedFeedback.toUid}</div>
+                  </div>
+                </div>
+
+                <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl">
+                  <span className="text-[10px] font-black text-slate-400 uppercase block mb-2">Rating</span>
+                  <div className="flex gap-1">
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <Shield 
+                        key={star}
+                        className={`w-5 h-5 ${star <= selectedFeedback.rating ? 'text-amber-400 fill-amber-400' : 'text-slate-200 dark:text-slate-700'}`} 
+                      />
+                    ))}
+                  </div>
+                </div>
+
+                <div className="p-6 bg-blue-50 dark:bg-blue-900/10 rounded-3xl border border-blue-100 dark:border-blue-900/30">
+                  <span className="text-[10px] font-black text-blue-600 dark:text-blue-400 uppercase block mb-2">Comment</span>
+                  <p className="text-slate-700 dark:text-slate-300 leading-relaxed italic">
+                    "{selectedFeedback.comment}"
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2 text-xs text-slate-400 justify-end">
+                  <Clock className="w-4 h-4" />
+                  {selectedFeedback.createdAt?.toDate().toLocaleString()}
+                </div>
+
+                <button 
+                  onClick={() => setSelectedFeedback(null)}
+                  className="w-full py-4 bg-slate-900 dark:bg-slate-800 text-white rounded-2xl font-bold hover:bg-slate-800 transition-all"
+                >
+                  Close Detail
+                </button>
               </div>
             </motion.div>
           </div>

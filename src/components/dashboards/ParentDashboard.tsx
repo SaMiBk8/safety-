@@ -26,8 +26,21 @@ export const ParentDashboard: React.FC<{ onStartCall?: (channel: string, receive
   const [childEmail, setChildEmail] = useState('');
   const [addChildStatus, setAddChildStatus] = useState<{ type: 'success' | 'error', message: string } | null>(null);
   const [selectedContact, setSelectedContact] = useState<{ uid: string, displayName: string } | null>(null);
-
+  const [unreadTotal, setUnreadTotal] = useState(0);
   const [lastKnownLocations, setLastKnownLocations] = useState<Record<string, { lat: number, lng: number }>>({});
+
+  useEffect(() => {
+    if (!profile?.uid) return;
+    const q = query(
+      collection(db, 'messages'),
+      where('receiverId', '==', profile.uid),
+      where('isRead', '==', false)
+    );
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setUnreadTotal(snapshot.size);
+    });
+    return () => unsubscribe();
+  }, [profile?.uid]);
 
   useEffect(() => {
     children.forEach(child => {
@@ -338,6 +351,15 @@ export const ParentDashboard: React.FC<{ onStartCall?: (channel: string, receive
                     >
                       <Phone className="w-4 h-4" /> Call Child
                     </button>
+            <button 
+              onClick={() => {
+                setSelectedContact({ uid: child.childUid, displayName: child.name });
+                setActiveModal('messenger');
+              }}
+              className="flex-1 py-3 bg-emerald-600 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 relative"
+            >
+              <MessageSquare className="w-4 h-4" /> Message
+            </button>
                     <button 
                       onClick={() => {
                         setSelectedChildForFeedback({ uid: child.childUid, name: child.name });
@@ -382,7 +404,12 @@ export const ParentDashboard: React.FC<{ onStartCall?: (channel: string, receive
           </section>
 
           {/* Quick Contacts */}
-          <section className="bg-blue-600 p-6 rounded-3xl text-white shadow-xl shadow-blue-100 dark:shadow-none">
+          <section className="bg-blue-600 p-6 rounded-3xl text-white shadow-xl shadow-blue-100 dark:shadow-none relative">
+            {unreadTotal > 0 && (
+              <span className="absolute -top-2 -right-2 bg-red-500 text-white text-[10px] font-black px-2 py-1 rounded-full animate-bounce shadow-lg">
+                {unreadTotal} NEW
+              </span>
+            )}
             <h3 className="font-bold mb-4">Messaging</h3>
             <p className="text-xs text-blue-100 mb-4">Direct messaging with teachers and school staff.</p>
             

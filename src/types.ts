@@ -25,6 +25,7 @@ export interface UserProfile {
   isDarkMode?: boolean;
   updatedAt?: any;
   photoUrl?: string;
+  subject?: string; // For teachers
 }
 
 export interface School {
@@ -42,6 +43,7 @@ export interface Student {
   teacherId?: string;
   name: string;
   grade: string;
+  subject?: string;
   location?: {
     lat: number;
     lng: number;
@@ -54,6 +56,30 @@ export interface Announcement {
   schoolId: string;
   title: string;
   content: string;
+  fileName?: string;
+  fileUrl?: string;
+  createdAt: any; // Firestore Timestamp
+}
+
+export interface Grade {
+  id: string;
+  studentId: string;
+  teacherId: string;
+  grade: string;
+  comment?: string;
+  behavior?: 'excellent' | 'good' | 'average' | 'poor';
+  createdAt: any; // Firestore Timestamp
+}
+
+export interface Assignment {
+  id: string;
+  schoolId: string;
+  teacherId: string;
+  teacherName: string;
+  teacherRole: UserRole;
+  title: string;
+  description: string;
+  dueDate?: any; // Firestore Timestamp
   createdAt: any; // Firestore Timestamp
 }
 
