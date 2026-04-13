@@ -40,7 +40,7 @@ export interface Student {
   childUid: string;
   parentUid: string;
   schoolId: string;
-  teacherId?: string;
+  teacherIds?: string[];
   name: string;
   grade: string;
   subject?: string;
@@ -93,4 +93,27 @@ export interface SOSAlert {
   };
   status: 'active' | 'resolved';
   createdAt: any; // Firestore Timestamp
+}
+
+export interface QuranProgress {
+  id: string;
+  studentId: string;
+  teacherId: string;
+  surah: string;
+  ayat?: string;
+  rating: number;
+  status: 'memorized' | 'reviewing' | 'improving';
+  notes?: string;
+  createdAt: any;
+}
+
+export interface SportsTraining {
+  id: string;
+  studentId: string;
+  teacherId: string;
+  exercise: string;
+  duration: string;
+  intensity: 'low' | 'medium' | 'high';
+  notes?: string;
+  createdAt: any;
 }

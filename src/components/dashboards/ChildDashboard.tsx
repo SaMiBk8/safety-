@@ -23,7 +23,7 @@ export const ChildDashboard: React.FC<{ onStartCall?: (channel: string, receiver
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isProcessingFile, setIsProcessingFile] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [teacherProfile, setTeacherProfile] = useState<{ uid: string, name: string } | null>(null);
+  const [teacherProfiles, setTeacherProfiles] = useState<{ uid: string, name: string, role: string }[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [unreadTotal, setUnreadTotal] = useState(0);
   const [grades, setGrades] = useState<any[]>([]);
@@ -57,21 +57,30 @@ export const ChildDashboard: React.FC<{ onStartCall?: (channel: string, receiver
   }, [studentData?.schoolId]);
 
   useEffect(() => {
-    const fetchTeacher = async () => {
-      if (studentData?.teacherId) {
+    const fetchTeachers = async () => {
+      if (studentData?.teacherIds && studentData.teacherIds.length > 0) {
         try {
-          const teacherDoc = await getDoc(doc(db, 'users', studentData.teacherId));
-          if (teacherDoc.exists()) {
-            const data = teacherDoc.data();
-            setTeacherProfile({ uid: teacherDoc.id, name: data.displayName || 'Teacher' });
-          }
+          const teacherDocs = await Promise.all(
+            studentData.teacherIds.map(id => getDoc(doc(db, 'users', id)))
+          );
+          const profiles = teacherDocs
+            .filter(d => d.exists())
+            .map(d => {
+              const data = d.data();
+              return { 
+                uid: d.id, 
+                name: data?.displayName || 'Teacher',
+                role: data?.role || 'teacher'
+              };
+            });
+          setTeacherProfiles(profiles);
         } catch (error) {
-          handleFirestoreError(error, OperationType.GET, `users/${studentData.teacherId}`, user);
+          handleFirestoreError(error, OperationType.GET, 'users', user);
         }
       }
     };
-    fetchTeacher();
-  }, [studentData]);
+    fetchTeachers();
+  }, [studentData?.teacherIds]);
 
   // 1. Fetch student record
   useEffect(() => {
@@ -495,7 +504,7 @@ export const ChildDashboard: React.FC<{ onStartCall?: (channel: string, receiver
                 <div className="flex justify-between items-start">
                   <div>
                     <div className="font-bold text-slate-900 dark:text-white text-sm">Surah {p.surah}</div>
-                    <div className="text-[10px] text-slate-500">Ayah: {p.ayah}</div>
+                    <div className="text-[10px] text-slate-500">Ayat: {p.ayat}</div>
                   </div>
                   <div className="flex gap-0.5">
                     {[1, 2, 3, 4, 5].map((star) => (

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, addDoc, query, where, onSnapshot, serverTimestamp, doc, updateDoc, orderBy, getDocs } from 'firebase/firestore';
+import { collection, addDoc, query, where, onSnapshot, serverTimestamp, doc, updateDoc, orderBy, getDocs, arrayUnion } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../../lib/firebase';
 import { useAuth } from '../../context/AuthContext';
@@ -212,7 +212,7 @@ export const SchoolAdminDashboard: React.FC = () => {
   const handleAssignTeacher = async (studentId: string, teacherId: string) => {
     try {
       await updateDoc(doc(db, 'students', studentId), {
-        teacherId: teacherId,
+        teacherIds: arrayUnion(teacherId),
         updatedAt: serverTimestamp()
       });
     } catch (error) {
@@ -743,12 +743,24 @@ export const SchoolAdminDashboard: React.FC = () => {
                       </select>
                     </td>
                     <td className="p-4">
+                      <div className="flex flex-wrap gap-2 mb-2">
+                        {student.teacherIds?.map((tid: string) => {
+                          const teacher = staff.find(s => s.uid === tid);
+                          return (
+                            <span key={tid} className="px-2 py-1 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded-lg text-[10px] font-bold">
+                              {teacher?.displayName || tid.slice(-6)}
+                            </span>
+                          );
+                        })}
+                      </div>
                       <select 
                         className="bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 dark:text-white w-full max-w-[200px]"
-                        value={student.teacherId || ''}
-                        onChange={(e) => handleAssignTeacher(student.id, e.target.value)}
+                        value=""
+                        onChange={(e) => {
+                          if (e.target.value) handleAssignTeacher(student.id, e.target.value);
+                        }}
                       >
-                        <option value="">Unassigned</option>
+                        <option value="">Add Teacher...</option>
                         {staff.filter(s => s.role === 'teacher').map(teacher => (
                           <option key={teacher.uid} value={teacher.uid}>
                             {teacher.displayName || teacher.email}

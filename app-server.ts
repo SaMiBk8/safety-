@@ -29,27 +29,40 @@ async function startServer() {
     const appId = process.env.VITE_AGORA_APP_ID?.trim();
     const appCertificate = process.env.AGORA_APP_CERTIFICATE?.trim();
 
-    if (!appId || !appCertificate) {
-      console.error('Agora credentials missing: AppID:', !!appId, 'Cert:', !!appCertificate);
+    if (!appId) {
+      console.error('Agora App ID missing');
       return res.status(500).json({ 
-        error: 'Agora credentials not configured on server. Please set VITE_AGORA_APP_ID and AGORA_APP_CERTIFICATE in the Secrets panel.' 
+        error: 'Agora App ID not configured. Please set VITE_AGORA_APP_ID in the Secrets panel.' 
       });
+    }
+
+    if (!appCertificate) {
+      console.log('Agora App Certificate missing, returning null token');
+      return res.json({ token: null });
     }
 
     console.log(`Agora Credentials Check: AppID length=${appId.length}, Cert length=${appCertificate.length}`);
 
     const uid = 0;
     const role = RtcRole.PUBLISHER;
-    const expirationTimeInSeconds = 3600; // 1 hour
+    const expirationTimeInSeconds = 3600 * 24; // 24 hours for maximum stability
     const currentTimestamp = Math.floor(Date.now() / 1000);
     const privilegeExpiredTs = currentTimestamp + expirationTimeInSeconds;
     
     try {
       let token;
-      console.log(`Generating token with: AppID=${appId?.substring(0, 5)}..., Cert=${appCertificate?.substring(0, 5)}..., Channel=${channelName}, ExpireTS=${privilegeExpiredTs}`);
+      console.log(`Generating Agora Token:
+        Channel: ${channelName}
+        AppID: ${appId.substring(0, 5)}...
+        Cert: ${appCertificate.substring(0, 5)}...
+        UID: ${uid}
+        Role: ${role}
+        Current Time: ${currentTimestamp}
+        Expire Time: ${privilegeExpiredTs}
+      `);
       
       try {
-        // Some versions of agora-token 2.x expect absolute timestamps (seconds since epoch)
+        // Try 7-argument version (newer SDKs)
         token = RtcTokenBuilder.buildTokenWithUid(
           appId,
           appCertificate,
@@ -59,8 +72,9 @@ async function startServer() {
           privilegeExpiredTs,
           privilegeExpiredTs
         );
+        console.log('Token generated using 7-argument method');
       } catch (e) {
-        console.warn('7-argument token generation failed, trying 6-argument version');
+        console.warn('7-argument method failed, falling back to 6-argument method');
         token = (RtcTokenBuilder as any).buildTokenWithUid(
           appId,
           appCertificate,
@@ -69,12 +83,21 @@ async function startServer() {
           role,
           privilegeExpiredTs
         );
+        console.log('Token generated using 6-argument method');
       }
-      console.log('Token generated successfully');
+
+      if (!token) {
+        throw new Error('Token builder returned empty result');
+      }
+
+      console.log(`Token generated successfully. Length: ${token.length}`);
       res.json({ token });
     } catch (error) {
-      console.error('Error generating Agora token:', error);
-      res.status(500).json({ error: 'Failed to generate token' });
+      console.error('CRITICAL: Agora Token Generation Failed:', error);
+      res.status(500).json({ 
+        error: 'Failed to generate security token',
+        details: error instanceof Error ? error.message : String(error)
+      });
     }
   });
 

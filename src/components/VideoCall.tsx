@@ -70,6 +70,7 @@ export const VideoCall: React.FC<VideoCallProps> = ({ appId, channel, token, uid
             const data = await response.json();
             if (data.token) {
               console.log('Successfully received token from backend. Length:', data.token.length);
+              console.log('Token (first 10 chars):', data.token.substring(0, 10));
               activeToken = data.token;
             } else {
               throw new Error('Token missing in server response');

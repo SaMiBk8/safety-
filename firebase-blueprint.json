@@ -38,7 +38,8 @@
         "childUid": { "type": "string" },
         "parentUid": { "type": "string" },
         "schoolId": { "type": "string" },
-        "teacherId": { "type": "string" },
+        "teacherId": { "type": "string", "description": "Legacy field, use teacherIds" },
+        "teacherIds": { "type": "array", "items": { "type": "string" }, "description": "List of teacher UIDs" },
         "name": { "type": "string" },
         "grade": { "type": "string" },
         "location": { 
@@ -142,6 +143,39 @@
       },
       "required": ["id", "schoolId", "teacherId", "title", "description", "createdAt"]
     },
+    "QuranProgress": {
+      "title": "Quran Progress",
+      "description": "Progress tracking for Quran memorization",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "studentId": { "type": "string" },
+        "teacherId": { "type": "string" },
+        "surah": { "type": "string" },
+        "ayat": { "type": "string" },
+        "rating": { "type": "number" },
+        "status": { "type": "string", "enum": ["memorized", "reviewing", "improving"] },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "studentId", "teacherId", "surah", "rating", "status", "createdAt"]
+    },
+    "SportsTraining": {
+      "title": "Sports Training",
+      "description": "Tracking for sports activities and performance",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "studentId": { "type": "string" },
+        "teacherId": { "type": "string" },
+        "exercise": { "type": "string" },
+        "duration": { "type": "string" },
+        "intensity": { "type": "string", "enum": ["low", "medium", "high"] },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "studentId", "teacherId", "exercise", "duration", "intensity", "createdAt"]
+    },
     "HomeworkSubmission": {
       "title": "Homework Submission",
       "description": "Homework submitted by students",
@@ -224,6 +258,14 @@
     "/assignments/{assignmentId}": {
       "schema": "Assignment",
       "description": "Work assigned to students"
+    },
+    "/quran_progress/{progressId}": {
+      "schema": "QuranProgress",
+      "description": "Quran memorization progress"
+    },
+    "/sports_training/{trainingId}": {
+      "schema": "SportsTraining",
+      "description": "Sports training records"
     },
     "/homework_submissions/{submissionId}": {
       "schema": "HomeworkSubmission",

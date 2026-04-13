@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { collection, query, where, onSnapshot, addDoc, serverTimestamp, getDocs, doc, getDoc, updateDoc, orderBy } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, addDoc, serverTimestamp, getDocs, doc, getDoc, updateDoc, orderBy, arrayUnion } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useAuth } from '../../context/AuthContext';
 import { Student, Announcement } from '../../types';
@@ -131,8 +131,9 @@ export const QuranTeacherDashboard: React.FC = () => {
         studentId: selectedStudent.id,
         teacherId: profile?.uid,
         surah: hifzProgress.surah,
-        ayah: hifzProgress.ayah,
+        ayat: hifzProgress.ayah, // Map ayah to ayat
         rating: hifzProgress.rating,
+        status: hifzProgress.rating >= 4 ? 'memorized' : hifzProgress.rating >= 2 ? 'reviewing' : 'improving',
         notes: hifzProgress.notes,
         createdAt: serverTimestamp(),
       });
@@ -174,7 +175,7 @@ export const QuranTeacherDashboard: React.FC = () => {
   const handleAssignToMe = async (studentId: string) => {
     try {
       await updateDoc(doc(db, 'students', studentId), {
-        teacherId: profile?.uid,
+        teacherIds: arrayUnion(profile?.uid),
         subject: teacherSubject,
         updatedAt: serverTimestamp()
       });
@@ -318,7 +319,7 @@ export const QuranTeacherDashboard: React.FC = () => {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
             {students
-              .filter(s => viewMode === 'my' ? s.teacherId === profile?.uid : true)
+              .filter(s => viewMode === 'my' ? s.teacherIds?.includes(profile?.uid || '') : true)
               .map(student => (
               <div key={student.id} className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm">
                 <div className="flex items-center justify-between gap-4 mb-4">
@@ -334,7 +335,7 @@ export const QuranTeacherDashboard: React.FC = () => {
                       )}
                     </div>
                   </div>
-                  {viewMode === 'all' && student.teacherId !== profile?.uid && (
+                  {viewMode === 'all' && !student.teacherIds?.includes(profile?.uid || '') && (
                     <button 
                       onClick={(e) => { e.stopPropagation(); handleAssignToMe(student.id); }}
                       className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-[10px] font-bold hover:bg-emerald-700 transition-colors"

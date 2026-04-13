@@ -1,16 +1,21 @@
 import React, { useEffect, useState } from 'react';
-import { collection, query, where, onSnapshot, doc, getDoc } from 'firebase/firestore';
-import { db } from '../../lib/firebase';
+import { collection, query, where, onSnapshot, doc, getDoc, addDoc, serverTimestamp } from 'firebase/firestore';
+import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
+import { db, storage } from '../../lib/firebase';
 import { useAuth } from '../../context/AuthContext';
 import { Student } from '../../types';
 import { motion } from 'motion/react';
-import { Shield, MapPin, Clock, Phone, UserCheck, Calendar, Info } from 'lucide-react';
+import { Shield, MapPin, Clock, Phone, UserCheck, Calendar, Info, MessageSquare, Send, FileText, X, CheckCircle2 } from 'lucide-react';
 import { handleFirestoreError, OperationType } from '../../lib/firestore-errors';
 
 export const AuthorizedPersonDashboard: React.FC = () => {
   const { user, profile } = useAuth();
   const [authorizedChildren, setAuthorizedChildren] = useState<Student[]>([]);
   const [schoolInfo, setSchoolInfo] = useState<any>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [messageToAdmin, setMessageToAdmin] = useState('');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
   useEffect(() => {
     if (!profile?.uid) return;
@@ -35,6 +40,60 @@ export const AuthorizedPersonDashboard: React.FC = () => {
     
     return () => unsubscribe();
   }, [profile?.uid]);
+
+  const handleSendToAdmin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!profile?.uid || !messageToAdmin) return;
+
+    setIsUploading(true);
+    setUploadProgress(0);
+    try {
+      let fileUrl = null;
+      let fileName = null;
+
+      if (selectedFile) {
+        const storageRef = ref(storage, `authorized_person_files/${profile.uid}/${Date.now()}_${selectedFile.name}`);
+        const uploadTask = uploadBytesResumable(storageRef, selectedFile);
+
+        await new Promise((resolve, reject) => {
+          uploadTask.on('state_changed',
+            (snapshot) => {
+              const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+              setUploadProgress(progress);
+            },
+            (error) => reject(error),
+            async () => {
+              fileUrl = await getDownloadURL(uploadTask.snapshot.ref);
+              fileName = selectedFile.name;
+              resolve(null);
+            }
+          );
+        });
+      }
+
+      await addDoc(collection(db, 'visitor_messages'), {
+        uid: profile.uid,
+        email: profile.email,
+        displayName: profile.displayName,
+        requestedRole: 'authorized_person',
+        schoolId: authorizedChildren[0]?.schoolId || null,
+        message: messageToAdmin,
+        fileName,
+        fileUrl,
+        createdAt: serverTimestamp(),
+        status: 'unread'
+      });
+
+      setMessageToAdmin('');
+      setSelectedFile(null);
+      alert('Message and file sent to admin successfully!');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'visitor_messages', user || undefined);
+    } finally {
+      setIsUploading(false);
+      setUploadProgress(null);
+    }
+  };
 
   return (
     <div className="space-y-8">
@@ -84,6 +143,51 @@ export const AuthorizedPersonDashboard: React.FC = () => {
                 </div>
               )}
             </div>
+          </section>
+
+          <section className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 shadow-sm">
+            <h3 className="font-bold text-slate-900 dark:text-white mb-6 flex items-center gap-2">
+              <MessageSquare className="w-5 h-5 text-purple-600" />
+              Message to School Admin
+            </h3>
+            <form onSubmit={handleSendToAdmin} className="space-y-4">
+              <textarea
+                value={messageToAdmin}
+                onChange={(e) => setMessageToAdmin(e.target.value)}
+                placeholder="Send a message or verification document to the school administration..."
+                className="w-full p-4 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-2xl outline-none focus:ring-2 focus:ring-purple-500 dark:text-white min-h-[100px]"
+                required
+              />
+              <div className="flex items-center gap-4">
+                <input
+                  type="file"
+                  id="ap-file-upload"
+                  className="hidden"
+                  onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+                />
+                <label
+                  htmlFor="ap-file-upload"
+                  className={`flex-1 p-4 border-2 border-dashed rounded-2xl text-center cursor-pointer transition-all ${
+                    selectedFile ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600' : 'border-slate-200 dark:border-slate-700 text-slate-400'
+                  }`}
+                >
+                  {selectedFile ? selectedFile.name : 'Attach Document (Optional)'}
+                </label>
+                <button
+                  type="submit"
+                  disabled={isUploading || !messageToAdmin}
+                  className="px-8 py-4 bg-purple-600 text-white rounded-2xl font-bold hover:bg-purple-700 transition-all disabled:opacity-50 flex items-center gap-2"
+                >
+                  {isUploading ? 'Sending...' : 'Send'}
+                  <Send className="w-4 h-4" />
+                </button>
+              </div>
+              {uploadProgress !== null && (
+                <div className="w-full h-1 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                  <div className="h-full bg-purple-600 transition-all" style={{ width: `${uploadProgress}%` }} />
+                </div>
+              )}
+            </form>
           </section>
 
           <section className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 shadow-sm">

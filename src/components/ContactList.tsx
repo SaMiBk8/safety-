@@ -155,7 +155,7 @@ export const ContactList: React.FC<ContactListProps> = ({ onSelect, selectedId }
           const studentsSnap = await getDocs(studentsQ);
           const studentData = studentsSnap.docs.map(d => d.data() as Student);
           
-          const teacherIds = Array.from(new Set(studentData.map(s => s.teacherId).filter(Boolean))) as string[];
+          const teacherIds = Array.from(new Set(studentData.flatMap(s => s.teacherIds || []).filter(Boolean))) as string[];
           
           const teachersSnap = await Promise.all(teacherIds.map(id => getDoc(doc(db, 'users', id))));
           const teachersList = teachersSnap
@@ -201,17 +201,19 @@ export const ContactList: React.FC<ContactListProps> = ({ onSelect, selectedId }
             let teacherList: Contact[] = [];
             let parentList: Contact[] = [];
 
-            if (student.teacherId) {
-              const teacherDoc = await getDoc(doc(db, 'users', student.teacherId));
-              if (teacherDoc.exists()) {
-                const data = teacherDoc.data();
-                teacherList = [{
-                  uid: teacherDoc.id,
-                  displayName: data.displayName || data.email,
-                  role: data.role,
-                  email: data.email
-                }];
-              }
+            if (student.teacherIds && student.teacherIds.length > 0) {
+              const teacherDocs = await Promise.all(student.teacherIds.map(id => getDoc(doc(db, 'users', id))));
+              teacherList = teacherDocs
+                .filter(d => d.exists())
+                .map(d => {
+                  const data = d.data()!;
+                  return {
+                    uid: d.id,
+                    displayName: data.displayName || data.email,
+                    role: data.role,
+                    email: data.email
+                  };
+                });
             }
 
             if (student.parentUid) {

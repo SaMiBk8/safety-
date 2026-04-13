@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { collection, query, where, onSnapshot, addDoc, serverTimestamp, updateDoc, doc, getDoc, orderBy } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, addDoc, serverTimestamp, updateDoc, doc, getDoc, orderBy, arrayUnion } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../../lib/firebase';
 import { useAuth } from '../../context/AuthContext';
@@ -197,7 +197,7 @@ export const TeacherDashboard: React.FC = () => {
   const handleAssignToMe = async (studentId: string) => {
     try {
       await updateDoc(doc(db, 'students', studentId), {
-        teacherId: profile?.uid,
+        teacherIds: arrayUnion(profile?.uid),
         subject: teacherSubject,
         updatedAt: serverTimestamp()
       });
@@ -457,13 +457,13 @@ export const TeacherDashboard: React.FC = () => {
             <div className="flex items-center gap-2 text-slate-900 dark:text-white font-bold mb-4">
               <Users className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
               {viewMode === 'my' ? 'My Students' : 'All School Students'} ({
-                students.filter(s => viewMode === 'my' ? s.teacherId === profile?.uid : true).length
+                students.filter(s => viewMode === 'my' ? s.teacherIds?.includes(profile?.uid || '') : true).length
               })
             </div>
             
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {students
-                .filter(s => viewMode === 'my' ? s.teacherId === profile?.uid : true)
+                .filter(s => viewMode === 'my' ? s.teacherIds?.includes(profile?.uid || '') : true)
                 .map((student) => (
                 <motion.div 
                   whileHover={{ y: -4 }}
@@ -484,7 +484,7 @@ export const TeacherDashboard: React.FC = () => {
                         )}
                       </div>
                     </div>
-                    {viewMode === 'all' && student.teacherId !== profile?.uid && (
+                    {viewMode === 'all' && !student.teacherIds?.includes(profile?.uid || '') && (
                       <button 
                         onClick={(e) => { e.stopPropagation(); handleAssignToMe(student.id); }}
                         className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-[10px] font-bold hover:bg-blue-700 transition-colors"

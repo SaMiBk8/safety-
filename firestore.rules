@@ -44,10 +44,45 @@ service cloud.firestore {
     //   - childUid: string (required)
     //   - parentUid: string (required)
     //   - schoolId: string (required)
-    //   - teacherId: string (optional)
+    //   - teacherIds: list (optional)
     //   - name: string (required)
     //   - grade: string (required)
     //   - location: map (optional)
+    //
+    // Collection: assignments
+    // Document ID: assignmentId
+    // Fields:
+    //   - schoolId: string (required)
+    //   - teacherId: string (required)
+    //   - teacherName: string (required)
+    //   - teacherRole: string (required)
+    //   - title: string (required)
+    //   - description: string (required)
+    //   - dueDate: timestamp (optional)
+    //   - createdAt: timestamp (required)
+    //
+    // Collection: quran_progress
+    // Document ID: progressId
+    // Fields:
+    //   - studentId: string (required)
+    //   - teacherId: string (required)
+    //   - surah: string (required)
+    //   - ayat: string (optional)
+    //   - rating: number (required)
+    //   - status: string (required)
+    //   - notes: string (optional)
+    //   - createdAt: timestamp (required)
+    //
+    // Collection: sports_training
+    // Document ID: trainingId
+    // Fields:
+    //   - studentId: string (required)
+    //   - teacherId: string (required)
+    //   - exercise: string (required)
+    //   - duration: string (required)
+    //   - intensity: string (required)
+    //   - notes: string (optional)
+    //   - createdAt: timestamp (required)
     //
     // ===============================================================
 
@@ -146,18 +181,54 @@ service cloud.firestore {
     }
 
     function isValidStudent(data) {
-      return hasOnlyAllowedFields(['id', 'childUid', 'parentUid', 'schoolId', 'teacherId', 'name', 'grade', 'location', 'updatedAt', 'createdAt', 'subject']) &&
+      return hasOnlyAllowedFields(['id', 'childUid', 'parentUid', 'schoolId', 'teacherId', 'teacherIds', 'name', 'grade', 'location', 'updatedAt', 'createdAt', 'subject']) &&
              data.childUid is string &&
              (!('id' in data) || data.id is string) &&
              (!('parentUid' in data) || (data.parentUid is string || data.parentUid == null)) &&
              (!('schoolId' in data) || (data.schoolId is string || data.schoolId == null)) &&
              (!('teacherId' in data) || (data.teacherId is string || data.teacherId == null)) &&
+             (!('teacherIds' in data) || data.teacherIds is list) &&
              (!('name' in data) || (data.name is string && data.name.size() < 100)) &&
              (!('grade' in data) || (data.grade is string && data.grade.size() < 50)) &&
              (!('subject' in data) || (data.subject is string && data.subject.size() < 100)) &&
              (!('location' in data) || (data.location is map && data.location.lat is number && data.location.lng is number)) &&
              (!('updatedAt' in data) || data.updatedAt is timestamp) &&
              (!('createdAt' in data) || data.createdAt is timestamp);
+    }
+
+    function isValidAssignment(data) {
+      return hasOnlyAllowedFields(['schoolId', 'teacherId', 'teacherName', 'teacherRole', 'title', 'description', 'dueDate', 'createdAt']) &&
+             data.schoolId is string &&
+             data.teacherId is string &&
+             data.teacherName is string &&
+             data.teacherRole is string &&
+             data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
+             data.description is string && data.description.size() > 0 && data.description.size() < 5000 &&
+             (!('dueDate' in data) || (data.dueDate is timestamp || data.dueDate == null)) &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidQuranProgress(data) {
+      return hasOnlyAllowedFields(['studentId', 'teacherId', 'surah', 'ayat', 'rating', 'status', 'notes', 'createdAt']) &&
+             data.studentId is string &&
+             data.teacherId is string &&
+             data.surah is string && data.surah.size() > 0 && data.surah.size() < 100 &&
+             (!('ayat' in data) || (data.ayat is string && data.ayat.size() < 50)) &&
+             data.rating is number && data.rating >= 1 && data.rating <= 5 &&
+             data.status in ['memorized', 'reviewing', 'improving'] &&
+             (!('notes' in data) || (data.notes is string && data.notes.size() < 1000)) &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidSportsTraining(data) {
+      return hasOnlyAllowedFields(['studentId', 'teacherId', 'exercise', 'duration', 'intensity', 'notes', 'createdAt']) &&
+             data.studentId is string &&
+             data.teacherId is string &&
+             data.exercise is string && data.exercise.size() > 0 && data.exercise.size() < 200 &&
+             data.duration is string && data.duration.size() > 0 && data.duration.size() < 50 &&
+             data.intensity in ['low', 'medium', 'high'] &&
+             (!('notes' in data) || (data.notes is string && data.notes.size() < 1000)) &&
+             data.createdAt is timestamp;
     }
 
     function isValidAnnouncement(data) {
@@ -408,8 +479,9 @@ service cloud.firestore {
     match /grades/{gradeId} {
       allow read: if isAuthenticated() && (
         isAdmin() || 
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'teacher' ||
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'school_admin'
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['teacher', 'school_admin'] ||
+        (exists(/databases/$(database)/documents/students/$(resource.data.studentId)) && get(/databases/$(database)/documents/students/$(resource.data.studentId)).data.childUid == request.auth.uid) ||
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'parent' && exists(/databases/$(database)/documents/students/$(resource.data.studentId)) && get(/databases/$(database)/documents/students/$(resource.data.studentId)).data.parentUid == request.auth.uid)
       );
       allow create: if isAuthenticated() && 
                     isValidGrade(request.resource.data) && (
@@ -433,6 +505,55 @@ service cloud.firestore {
                         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'child' &&
                         request.resource.data.childUid == request.auth.uid
                       )
+                    );
+    }
+
+    match /assignments/{assignmentId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && 
+                    isValidAssignment(request.resource.data) && (
+                      isAdmin() || 
+                      isSchoolAdmin(request.resource.data.schoolId) ||
+                      (isTeacher(request.resource.data.schoolId) && request.resource.data.teacherId == request.auth.uid)
+                    );
+      allow update: if isAuthenticated() && 
+                    isValidAssignment(request.resource.data) && (
+                      isAdmin() || 
+                      isSchoolAdmin(resource.data.schoolId) ||
+                      (isTeacher(resource.data.schoolId) && resource.data.teacherId == request.auth.uid)
+                    );
+      allow delete: if isAuthenticated() && (
+                      isAdmin() || 
+                      isSchoolAdmin(resource.data.schoolId) ||
+                      (isTeacher(resource.data.schoolId) && resource.data.teacherId == request.auth.uid)
+                    );
+    }
+
+    match /quran_progress/{progressId} {
+      allow read: if isAuthenticated() && (
+        isAdmin() || 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['quran_teacher', 'school_admin'] ||
+        (exists(/databases/$(database)/documents/students/$(resource.data.studentId)) && get(/databases/$(database)/documents/students/$(resource.data.studentId)).data.childUid == request.auth.uid) ||
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'parent' && exists(/databases/$(database)/documents/students/$(resource.data.studentId)) && get(/databases/$(database)/documents/students/$(resource.data.studentId)).data.parentUid == request.auth.uid)
+      );
+      allow create: if isAuthenticated() && 
+                    isValidQuranProgress(request.resource.data) && (
+                      isAdmin() || 
+                      get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'quran_teacher'
+                    );
+    }
+
+    match /sports_training/{trainingId} {
+      allow read: if isAuthenticated() && (
+        isAdmin() || 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['sports_coach', 'school_admin'] ||
+        (exists(/databases/$(database)/documents/students/$(resource.data.studentId)) && get(/databases/$(database)/documents/students/$(resource.data.studentId)).data.childUid == request.auth.uid) ||
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'parent' && exists(/databases/$(database)/documents/students/$(resource.data.studentId)) && get(/databases/$(database)/documents/students/$(resource.data.studentId)).data.parentUid == request.auth.uid)
+      );
+      allow create: if isAuthenticated() && 
+                    isValidSportsTraining(request.resource.data) && (
+                      isAdmin() || 
+                      get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'sports_coach'
                     );
     }
 
