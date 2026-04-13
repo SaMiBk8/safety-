@@ -112,6 +112,7 @@ export const TeacherDashboard: React.FC = () => {
 
   useEffect(() => {
     if (!profile?.schoolId) return;
+    // Query all submissions for the school so teachers can see any student's work
     const q = query(
       collection(db, 'homework_submissions'), 
       where('schoolId', '==', profile.schoolId),
@@ -124,6 +125,18 @@ export const TeacherDashboard: React.FC = () => {
     });
     return () => unsubscribe();
   }, [profile?.schoolId]);
+
+  const handleUpdateSubmissionStatus = async (id: string, currentStatus: string) => {
+    try {
+      const newStatus = currentStatus === 'pending' ? 'reviewed' : 'pending';
+      await updateDoc(doc(db, 'homework_submissions', id), {
+        status: newStatus,
+        updatedAt: serverTimestamp()
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `homework_submissions/${id}`, user || undefined);
+    }
+  };
 
   useEffect(() => {
     if (!profile?.schoolId) return;
@@ -671,6 +684,7 @@ export const TeacherDashboard: React.FC = () => {
                 <th className="p-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Student</th>
                 <th className="p-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Homework</th>
                 <th className="p-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Date</th>
+                <th className="p-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Status</th>
                 <th className="p-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-right">Action</th>
               </tr>
             </thead>
@@ -678,12 +692,32 @@ export const TeacherDashboard: React.FC = () => {
               {submissions.map((sub) => (
                 <tr key={sub.id}>
                   <td className="p-4 font-bold text-slate-900 dark:text-white">{sub.studentName}</td>
-                  <td className="p-4 text-slate-600 dark:text-slate-400">{sub.title}</td>
+                  <td className="p-4">
+                    <div className="text-slate-900 dark:text-white font-medium">{sub.title}</div>
+                    {sub.description && <div className="text-xs text-slate-500 line-clamp-1">{sub.description}</div>}
+                  </td>
                   <td className="p-4 text-xs text-slate-500">{sub.submittedAt?.toDate()?.toLocaleString() || 'Pending...'}</td>
-                  <td className="p-4 text-right">
+                  <td className="p-4">
+                    <span className={`text-[10px] font-black uppercase px-2 py-1 rounded-full ${
+                      sub.status === 'pending' ? 'bg-amber-100 text-amber-600' : 'bg-emerald-100 text-emerald-600'
+                    }`}>
+                      {sub.status}
+                    </span>
+                  </td>
+                  <td className="p-4 text-right space-x-2">
                     {sub.fileUrl && (
-                      <a href={sub.fileUrl} target="_blank" rel="noreferrer" className="text-blue-600 font-bold text-xs hover:underline">View File</a>
+                      <a href={sub.fileUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-blue-600 font-bold text-xs hover:underline">
+                        <FileText className="w-3 h-3" /> View
+                      </a>
                     )}
+                    <button 
+                      onClick={() => handleUpdateSubmissionStatus(sub.id, sub.status)}
+                      className={`px-3 py-1 rounded-lg text-[10px] font-bold transition-colors ${
+                        sub.status === 'pending' ? 'bg-emerald-500 text-white hover:bg-emerald-600' : 'bg-slate-200 text-slate-600 hover:bg-slate-300'
+                      }`}
+                    >
+                      {sub.status === 'pending' ? 'Mark Reviewed' : 'Undo'}
+                    </button>
                   </td>
                 </tr>
               ))}

@@ -183,12 +183,18 @@
       "properties": {
         "id": { "type": "string" },
         "studentId": { "type": "string" },
+        "studentName": { "type": "string" },
+        "schoolId": { "type": "string" },
         "childUid": { "type": "string" },
+        "teacherId": { "type": "string" },
         "title": { "type": "string" },
+        "description": { "type": "string" },
+        "fileName": { "type": "string" },
+        "fileUrl": { "type": "string" },
         "status": { "type": "string", "enum": ["pending", "reviewed"] },
         "submittedAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["id", "studentId", "childUid", "title", "status", "submittedAt"]
+      "required": ["id", "studentId", "studentName", "schoolId", "childUid", "title", "status", "submittedAt"]
     },
     "Feedback": {
       "title": "Feedback",

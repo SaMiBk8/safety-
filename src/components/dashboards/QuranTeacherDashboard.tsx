@@ -64,10 +64,11 @@ export const QuranTeacherDashboard: React.FC = () => {
   }, [profile?.schoolId]);
 
   useEffect(() => {
-    if (!profile?.schoolId) return;
+    if (!profile?.schoolId || !profile?.uid) return;
     const q = query(
       collection(db, 'homework_submissions'), 
       where('schoolId', '==', profile.schoolId),
+      where('teacherId', '==', profile.uid),
       orderBy('submittedAt', 'desc')
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {

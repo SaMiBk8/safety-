@@ -799,24 +799,31 @@ export const SchoolAdminDashboard: React.FC = () => {
             <thead>
               <tr className="bg-slate-50 dark:bg-slate-800/50 border-bottom border-slate-100 dark:border-slate-800">
                 <th className="p-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Student</th>
+                <th className="p-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Teacher</th>
                 <th className="p-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Homework</th>
                 <th className="p-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Date</th>
                 <th className="p-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-right">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
-              {submissions.map((sub) => (
-                <tr key={sub.id}>
-                  <td className="p-4 font-bold text-slate-900 dark:text-white">{sub.studentName}</td>
-                  <td className="p-4 text-slate-600 dark:text-slate-400">{sub.title}</td>
-                  <td className="p-4 text-xs text-slate-500">{sub.submittedAt?.toDate()?.toLocaleString() || 'Pending...'}</td>
-                  <td className="p-4 text-right">
-                    {sub.fileUrl && (
-                      <a href={sub.fileUrl} target="_blank" rel="noreferrer" className="text-blue-600 font-bold text-xs hover:underline">View File</a>
-                    )}
-                  </td>
-                </tr>
-              ))}
+              {submissions.map((sub) => {
+                const teacher = staff.find(s => s.uid === sub.teacherId);
+                return (
+                  <tr key={sub.id}>
+                    <td className="p-4 font-bold text-slate-900 dark:text-white">{sub.studentName}</td>
+                    <td className="p-4 text-xs text-slate-600 dark:text-slate-400">
+                      {teacher?.displayName || 'Not Assigned'}
+                    </td>
+                    <td className="p-4 text-slate-600 dark:text-slate-400">{sub.title}</td>
+                    <td className="p-4 text-xs text-slate-500">{sub.submittedAt?.toDate()?.toLocaleString() || 'Pending...'}</td>
+                    <td className="p-4 text-right">
+                      {sub.fileUrl && (
+                        <a href={sub.fileUrl} target="_blank" rel="noreferrer" className="text-blue-600 font-bold text-xs hover:underline">View File</a>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
               {submissions.length === 0 && (
                 <tr>
                   <td colSpan={4} className="p-8 text-center text-slate-400 italic text-sm">No submissions found.</td>

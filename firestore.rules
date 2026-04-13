@@ -84,6 +84,20 @@ service cloud.firestore {
     //   - notes: string (optional)
     //   - createdAt: timestamp (required)
     //
+    // Collection: homework_submissions
+    // Document ID: submissionId
+    // Fields:
+    //   - studentId: string (required)
+    //   - studentName: string (required)
+    //   - schoolId: string (required)
+    //   - childUid: string (required)
+    //   - teacherId: string (optional)
+    //   - title: string (required)
+    //   - fileName: string (optional)
+    //   - fileUrl: string (optional)
+    //   - submittedAt: timestamp (required)
+    //   - status: string (required, enum: pending, reviewed)
+    //
     // ===============================================================
 
     // ===============================================================
@@ -278,12 +292,14 @@ service cloud.firestore {
     }
 
     function isValidHomeworkSubmission(data) {
-      return hasOnlyAllowedFields(['studentId', 'studentName', 'schoolId', 'childUid', 'title', 'fileName', 'fileUrl', 'submittedAt', 'status']) &&
+      return hasOnlyAllowedFields(['studentId', 'studentName', 'schoolId', 'childUid', 'teacherId', 'title', 'description', 'fileName', 'fileUrl', 'submittedAt', 'status']) &&
              data.studentId is string &&
              data.studentName is string &&
              data.schoolId is string &&
              data.childUid is string &&
+             (!('teacherId' in data) || (data.teacherId is string || data.teacherId == null)) &&
              data.title is string && data.title.size() > 0 && data.title.size() < 500 &&
+             (!('description' in data) || (data.description is string && data.description.size() < 2000)) &&
              (!('fileName' in data) || (data.fileName is string || data.fileName == null)) &&
              (!('fileUrl' in data) || (data.fileUrl is string || data.fileUrl == null)) &&
              data.submittedAt is timestamp &&
@@ -496,7 +512,7 @@ service cloud.firestore {
       allow read: if isAuthenticated() && (
         isAdmin() || 
         request.auth.uid == resource.data.childUid ||
-        isTeacher(resource.data.schoolId) ||
+        request.auth.uid == resource.data.teacherId ||
         isSchoolAdmin(resource.data.schoolId)
       );
       allow create: if isAuthenticated() && 

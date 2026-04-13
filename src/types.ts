@@ -107,6 +107,21 @@ export interface QuranProgress {
   createdAt: any;
 }
 
+export interface HomeworkSubmission {
+  id: string;
+  studentId: string;
+  studentName: string;
+  schoolId: string;
+  childUid: string;
+  teacherId: string;
+  title: string;
+  description?: string;
+  fileName?: string;
+  fileUrl?: string;
+  submittedAt: any; // Firestore Timestamp
+  status: 'pending' | 'reviewed';
+}
+
 export interface SportsTraining {
   id: string;
   studentId: string;

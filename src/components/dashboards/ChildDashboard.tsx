@@ -20,9 +20,11 @@ export const ChildDashboard: React.FC<{ onStartCall?: (channel: string, receiver
   const [selectedContactForFeedback, setSelectedContactForFeedback] = useState<{ uid: string, name: string } | null>(null);
   const [selectedContact, setSelectedContact] = useState<{ uid: string, displayName: string } | null>(null);
   const [homeworkTitle, setHomeworkTitle] = useState('');
+  const [homeworkDescription, setHomeworkDescription] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isProcessingFile, setIsProcessingFile] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [selectedTeacherId, setSelectedTeacherId] = useState<string>('');
   const [teacherProfiles, setTeacherProfiles] = useState<{ uid: string, name: string, role: string }[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [unreadTotal, setUnreadTotal] = useState(0);
@@ -58,10 +60,11 @@ export const ChildDashboard: React.FC<{ onStartCall?: (channel: string, receiver
 
   useEffect(() => {
     const fetchTeachers = async () => {
-      if (studentData?.teacherIds && studentData.teacherIds.length > 0) {
+      const ids = studentData?.teacherIds || [];
+      if (ids.length > 0) {
         try {
           const teacherDocs = await Promise.all(
-            studentData.teacherIds.map(id => getDoc(doc(db, 'users', id)))
+            ids.map(id => getDoc(doc(db, 'users', id)))
           );
           const profiles = teacherDocs
             .filter(d => d.exists())
@@ -77,6 +80,8 @@ export const ChildDashboard: React.FC<{ onStartCall?: (channel: string, receiver
         } catch (error) {
           handleFirestoreError(error, OperationType.GET, 'users', user);
         }
+      } else {
+        setTeacherProfiles([]);
       }
     };
     fetchTeachers();
@@ -230,52 +235,124 @@ export const ChildDashboard: React.FC<{ onStartCall?: (channel: string, receiver
 
   const handleHomeworkSubmit = async () => {
     if (!homeworkTitle || !studentData?.id) {
-      console.error("Cannot submit homework: studentData or homeworkTitle missing", { homeworkTitle, studentData });
+      alert("Please enter a title and ensure your student profile is loaded.");
       return;
     }
+
+    if (!selectedTeacherId) {
+      alert("Please select a teacher to send your homework to.");
+      return;
+    }
+
+    if (profile?.role !== 'child' && profile?.role !== 'system_admin') {
+      alert("Only students can submit homework.");
+      return;
+    }
+
+    if (!navigator.onLine) {
+      alert("You are offline. Please check your internet connection and try again.");
+      return;
+    }
+
     setIsSubmitting(true);
     setUploadProgress(0);
+    console.log("Starting homework submission process...");
+
     try {
+      if (!user?.uid) {
+        throw new Error("User ID not found. Please try logging out and back in.");
+      }
+
       let fileUrl = null;
       if (selectedFile) {
-        const storageRef = ref(storage, `homework/${user?.uid}/${Date.now()}_${selectedFile.name}`);
+        console.log("File detected:", selectedFile.name, "Size:", selectedFile.size);
         
-        // Use uploadBytesResumable for progress feedback
-        await new Promise((resolve, reject) => {
-          const uploadTask = uploadBytesResumable(storageRef, selectedFile);
-          
+        if (selectedFile.size > 10 * 1024 * 1024) {
+          throw new Error("File is too large. Please upload a file smaller than 10MB.");
+        }
+
+        const sanitizedName = selectedFile.name.replace(/[^a-zA-Z0-9.]/g, '_');
+        const storagePath = `homework/${user.uid}/${Date.now()}_${sanitizedName}`;
+        console.log("Target storage path:", storagePath, "Type:", selectedFile.type);
+        
+        const storageRef = ref(storage, storagePath);
+        const uploadTask = uploadBytesResumable(storageRef, selectedFile);
+        
+        fileUrl = await new Promise((resolve, reject) => {
+          // 15 minute timeout for extremely slow connections
+          const timeout = setTimeout(() => {
+            uploadTask.cancel();
+            reject(new Error("The upload timed out after 15 minutes. This usually indicates a very poor connection or a firewall blocking the upload."));
+          }, 900000);
+
           uploadTask.on('state_changed', 
             (snapshot) => {
               const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
               setUploadProgress(progress);
+              console.log(`Upload progress: ${progress.toFixed(2)}% - State: ${snapshot.state}`);
             }, 
-            (error) => reject(error), 
+            (error: any) => {
+              clearTimeout(timeout);
+              console.error("Upload Error Details:", error);
+              
+              if (error.code === 'storage/retry-limit-exceeded') {
+                reject(new Error("The connection to the storage server was lost multiple times. This is often caused by a strict firewall (like at a school or office) or a very unstable internet connection. Please try a smaller file or use a different network (like a mobile hotspot)."));
+              } else if (error.code === 'storage/unauthorized') {
+                reject(new Error("You don't have permission to upload this file. Please try logging out and back in."));
+              } else {
+                reject(error);
+              }
+            }, 
             async () => {
-              fileUrl = await getDownloadURL(uploadTask.snapshot.ref);
-              resolve(fileUrl);
+              clearTimeout(timeout);
+              try {
+                const url = await getDownloadURL(uploadTask.snapshot.ref);
+                resolve(url);
+              } catch (err) {
+                reject(err);
+              }
             }
           );
         });
+        
+        console.log("File uploaded successfully, URL:", fileUrl);
       }
 
+      console.log("Adding document to Firestore...");
       await addDoc(collection(db, 'homework_submissions'), {
         studentId: studentData.id,
-        studentName: studentData.name,
-        schoolId: studentData.schoolId,
+        studentName: studentData.name || profile?.displayName || 'Student',
+        schoolId: studentData.schoolId || profile?.schoolId || '',
         childUid: user?.uid || '',
+        teacherId: selectedTeacherId,
         title: homeworkTitle,
+        description: homeworkDescription,
         fileName: selectedFile?.name || null,
         fileUrl,
         submittedAt: serverTimestamp(),
         status: 'pending'
       });
+      console.log("Document added successfully");
+
       setHomeworkTitle('');
+      setHomeworkDescription('');
+      setSelectedTeacherId('');
       setSelectedFile(null);
       setUploadProgress(null);
       setActiveModal(null);
       alert('Homework submitted successfully!');
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'homework_submissions', user || undefined);
+      console.error("Submission Error Details:", error);
+      if (error instanceof Error) {
+        alert(`Failed to submit homework: ${error.message}`);
+      } else {
+        // Use the custom error handler for Firestore errors
+        try {
+          handleFirestoreError(error, OperationType.CREATE, 'homework_submissions', user || undefined);
+        } catch (e) {
+          alert("A database error occurred. Please check your connection and try again.");
+        }
+      }
     } finally {
       setIsSubmitting(false);
       setUploadProgress(null);
@@ -574,13 +651,54 @@ export const ChildDashboard: React.FC<{ onStartCall?: (channel: string, receiver
                 </div>
 
                 <div className="space-y-6">
+                  {!studentData?.id && (
+                    <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-900/30 rounded-2xl">
+                      <p className="text-xs text-red-700 dark:text-red-400 font-medium">
+                        Your student profile is not fully loaded. Please wait a moment or contact your school admin to ensure you are registered.
+                      </p>
+                    </div>
+                  )}
                   <div>
-                    <label className="block text-sm font-bold text-slate-500 mb-2">Homework Title / Description</label>
-                    <textarea 
-                      placeholder="What are you submitting?"
-                      className="w-full p-4 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-2xl outline-none dark:text-white min-h-[120px]"
+                    <label className="block text-sm font-bold text-slate-500 mb-2">Select Teacher</label>
+                    {teacherProfiles.length === 0 ? (
+                      <div className="p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-100 dark:border-amber-900/30 rounded-2xl">
+                        <p className="text-xs text-amber-700 dark:text-amber-400 font-medium">
+                          No teachers assigned to you yet. Please ask your school admin to assign your teachers so you can submit homework.
+                        </p>
+                      </div>
+                    ) : (
+                      <select 
+                        className="w-full p-4 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-2xl outline-none dark:text-white focus:ring-2 focus:ring-blue-500 transition-all"
+                        value={selectedTeacherId}
+                        onChange={(e) => setSelectedTeacherId(e.target.value)}
+                        required
+                      >
+                        <option value="">Choose a teacher...</option>
+                        {teacherProfiles.map(t => (
+                          <option key={t.uid} value={t.uid}>
+                            {t.name} ({t.role.replace('_', ' ')})
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-slate-500 mb-2">Homework Title</label>
+                    <input 
+                      type="text"
+                      placeholder="e.g., Math Chapter 1"
+                      className="w-full p-4 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-2xl outline-none dark:text-white focus:ring-2 focus:ring-blue-500 transition-all"
                       value={homeworkTitle}
                       onChange={(e) => setHomeworkTitle(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-slate-500 mb-2">Description / Notes</label>
+                    <textarea 
+                      placeholder="Any notes for your teacher?"
+                      className="w-full p-4 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-2xl outline-none dark:text-white min-h-[100px] focus:ring-2 focus:ring-blue-500 transition-all"
+                      value={homeworkDescription}
+                      onChange={(e) => setHomeworkDescription(e.target.value)}
                     />
                   </div>
                   <div className="space-y-2">
@@ -631,8 +749,8 @@ export const ChildDashboard: React.FC<{ onStartCall?: (channel: string, receiver
                   </div>
                   <button 
                     onClick={handleHomeworkSubmit}
-                    disabled={!homeworkTitle || isSubmitting || !studentData?.id}
-                    className="w-full py-4 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition-all disabled:opacity-50 flex flex-col items-center justify-center gap-1"
+                    disabled={isSubmitting}
+                    className="w-full py-4 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition-all disabled:opacity-50 flex flex-col items-center justify-center gap-1 shadow-lg shadow-blue-200 dark:shadow-none"
                   >
                     <div className="flex items-center gap-2">
                       {isSubmitting ? (
