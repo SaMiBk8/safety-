@@ -20,13 +20,14 @@ interface VisitorMessage {
 }
 
 import { Chat } from '../Chat';
+import { PrivateMessaging } from '../PrivateMessaging';
 
 export const SystemAdminDashboard: React.FC = () => {
   const { user } = useAuth();
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [messages, setMessages] = useState<VisitorMessage[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeTab, setActiveTab] = useState<'users' | 'pending' | 'messages' | 'schools' | 'relationships' | 'feedbacks'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'pending' | 'messages' | 'schools' | 'relationships' | 'feedbacks' | 'private_chat'>('users');
   const [schools, setSchools] = useState<School[]>([]);
   const [feedbacks, setFeedbacks] = useState<any[]>([]);
   const [isAddingSchool, setIsAddingSchool] = useState(false);
@@ -110,9 +111,45 @@ export const SystemAdminDashboard: React.FC = () => {
     }
   };
 
+  const ensureStudentRecord = async (childUid: string, name: string, schoolId: string, parentUid?: string) => {
+    try {
+      const q = query(collection(db, 'students'), where('childUid', '==', childUid));
+      const snap = await getDocs(q);
+      
+      if (snap.empty) {
+        const studentRef = doc(collection(db, 'students'));
+        await setDoc(studentRef, {
+          id: studentRef.id,
+          childUid,
+          name,
+          schoolId: schoolId || '',
+          parentUid: parentUid || '',
+          grade: 'Not Assigned',
+          teacherIds: [],
+          createdAt: serverTimestamp()
+        });
+        console.log('Created new student record for:', childUid);
+      } else if (parentUid || schoolId) {
+        const updates: any = {};
+        if (parentUid) updates.parentUid = parentUid;
+        if (schoolId) updates.schoolId = schoolId;
+        
+        await updateDoc(doc(db, 'students', snap.docs[0].id), updates);
+        console.log('Updated student record for:', childUid);
+      }
+    } catch (error) {
+      console.error('Error ensuring student record:', error);
+    }
+  };
+
   const approveUser = async (uid: string) => {
     try {
+      const userToApprove = users.find(u => u.uid === uid);
       await updateDoc(doc(db, 'users', uid), { status: 'active' });
+      
+      if (userToApprove?.requestedRole === 'child' || userToApprove?.role === 'child') {
+        await ensureStudentRecord(uid, userToApprove.displayName || userToApprove.email, userToApprove.schoolId || '');
+      }
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `users/${uid}`, user || undefined);
     }
@@ -120,7 +157,12 @@ export const SystemAdminDashboard: React.FC = () => {
 
   const updateUserRole = async (uid: string, newRole: string) => {
     try {
+      const userToUpdate = users.find(u => u.uid === uid);
       await updateDoc(doc(db, 'users', uid), { role: newRole });
+      
+      if (newRole === 'child') {
+        await ensureStudentRecord(uid, userToUpdate?.displayName || userToUpdate?.email || 'Student', userToUpdate?.schoolId || '');
+      }
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `users/${uid}`, user || undefined);
     }
@@ -130,10 +172,21 @@ export const SystemAdminDashboard: React.FC = () => {
     setIsCleaning(true);
     try {
       const nonAdmins = users.filter(u => u.role !== 'system_admin');
-      const deletePromises = nonAdmins.map(u => deleteDoc(doc(db, 'users', u.uid)));
+      const deletePromises = nonAdmins.flatMap(u => [
+        deleteDoc(doc(db, 'users', u.uid)),
+        // We can't easily query all collections here without multiple calls, 
+        // but let's at least clear their visitor messages
+      ]);
       await Promise.all(deletePromises);
+
+      // Clear visitor messages for all deleted users
+      const msgSnap = await getDocs(collection(db, 'visitor_messages'));
+      const msgDeletes = msgSnap.docs.map(d => deleteDoc(d.ref));
+      await Promise.all(msgDeletes);
+
       setShowCleanupConfirm(false);
       setSelectedUserIds([]);
+      alert('All non-admin accounts and visitor requests have been cleared.');
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, 'users', user || undefined);
     } finally {
@@ -170,14 +223,19 @@ export const SystemAdminDashboard: React.FC = () => {
     
     setIsDeletingSelected(true);
     try {
-      const deletePromises = idsToDelete.map(uid => {
-        console.log('Deleting user:', uid);
-        return deleteDoc(doc(db, 'users', uid));
-      });
-      await Promise.all(deletePromises);
-      console.log('Successfully deleted selected users');
+      for (const uid of idsToDelete) {
+        await deleteDoc(doc(db, 'users', uid));
+        
+        // Delete their visitor messages
+        const msgQuery = query(collection(db, 'visitor_messages'), where('uid', '==', uid));
+        const msgSnap = await getDocs(msgQuery);
+        const msgDeletes = msgSnap.docs.map(d => deleteDoc(d.ref));
+        await Promise.all(msgDeletes);
+      }
+      
+      console.log('Successfully deleted selected users and their data');
       setSelectedUserIds([]);
-      alert(`Successfully deleted ${idsToDelete.length} accounts.`);
+      alert(`Successfully deleted ${idsToDelete.length} accounts and their related data.`);
     } catch (error) {
       console.error('Delete selected users failed:', error);
       handleFirestoreError(error, OperationType.DELETE, 'users', user || undefined);
@@ -199,9 +257,17 @@ export const SystemAdminDashboard: React.FC = () => {
     }
     if (!window.confirm('Are you sure you want to permanently delete this account? This action cannot be undone.')) return;
     try {
+      // Delete user document
       await deleteDoc(doc(db, 'users', uid));
-      console.log('Successfully deleted user:', uid);
-      alert('Account successfully deleted.');
+      
+      // Delete their visitor messages
+      const msgQuery = query(collection(db, 'visitor_messages'), where('uid', '==', uid));
+      const msgSnap = await getDocs(msgQuery);
+      const msgDeletes = msgSnap.docs.map(d => deleteDoc(d.ref));
+      await Promise.all(msgDeletes);
+
+      console.log('Successfully deleted user and related data:', uid);
+      alert('Account and related data successfully deleted.');
     } catch (error) {
       console.error('Delete user failed:', error);
       handleFirestoreError(error, OperationType.DELETE, `users/${uid}`, user || undefined);
@@ -377,7 +443,31 @@ export const SystemAdminDashboard: React.FC = () => {
           User Feedback
           {activeTab === 'feedbacks' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
         </button>
+        <button 
+          onClick={() => setActiveTab('private_chat')}
+          className={`pb-4 px-2 text-sm font-bold transition-all relative flex items-center gap-2 shrink-0 ${
+            activeTab === 'private_chat' ? 'text-blue-600' : 'text-slate-400'
+          }`}
+        >
+          Private Chat
+          {unreadPrivateCount > 0 && (
+            <span className="bg-red-500 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full animate-bounce">
+              {unreadPrivateCount}
+            </span>
+          )}
+          {activeTab === 'private_chat' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
+        </button>
       </div>
+
+      {activeTab === 'private_chat' && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mt-6"
+        >
+          <PrivateMessaging />
+        </motion.div>
+      )}
 
       {activeTab === 'users' ? (
         <>
@@ -531,6 +621,18 @@ export const SystemAdminDashboard: React.FC = () => {
                   </td>
                   <td className="p-4">
                     <p className="text-xs text-slate-500 dark:text-slate-400 max-w-xs truncate">{user.requestMessage || 'No message'}</p>
+                    {user.fileUrl && (
+                      <div className="mt-1">
+                        <a 
+                          href={user.fileUrl} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-[10px] font-bold text-blue-600 hover:underline"
+                        >
+                          <FileText className="w-3 h-3" /> {user.fileName || 'View Verification'}
+                        </a>
+                      </div>
+                    )}
                   </td>
                   <td className="p-4 text-right space-x-2">
                     <button 
@@ -604,6 +706,8 @@ export const SystemAdminDashboard: React.FC = () => {
                     parentId: pUser.uid,
                     updatedAt: serverTimestamp()
                   });
+
+                  await ensureStudentRecord(cUser.uid, cUser.displayName || cUser.email, cUser.schoolId || '', pUser.uid);
 
                   alert('Successfully linked parent and child.');
                   (document.getElementById('parentEmail') as HTMLInputElement).value = '';

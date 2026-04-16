@@ -12,14 +12,18 @@ const mapContainerStyle = { width: '100%', height: '300px' };
 
 import { Chat } from '../Chat';
 import { ContactList } from '../ContactList';
+import { PrivateMessaging } from '../PrivateMessaging';
 import { FeedbackModal } from '../FeedbackModal';
+
+import { QRCodeCanvas } from 'qrcode.react';
+import { toast } from 'sonner';
 
 export const ParentDashboard: React.FC<{ onStartCall?: (channel: string, receiverId: string, receiverName: string) => void }> = ({ onStartCall }) => {
   const { user, profile } = useAuth();
   const [children, setChildren] = useState<Student[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [activeAlerts, setActiveAlerts] = useState<SOSAlert[]>([]);
-  const [activeModal, setActiveModal] = useState<'messenger' | 'feedback' | null>(null);
+  const [activeModal, setActiveModal] = useState<'messenger' | 'feedback' | 'link-child' | null>(null);
   const [selectedChildForFeedback, setSelectedChildForFeedback] = useState<{ uid: string, name: string } | null>(null);
   const [mapCenters, setMapCenters] = useState<Record<string, { lat: number, lng: number }>>({});
   const [isAddingChild, setIsAddingChild] = useState(false);
@@ -95,6 +99,12 @@ export const ParentDashboard: React.FC<{ onStartCall?: (channel: string, receive
   // Listen for SOS Alerts
   useEffect(() => {
     if (!profile?.uid) return;
+
+    // Request notification permission
+    if ("Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission();
+    }
+
     const q = query(
       collection(db, 'sos_alerts'), 
       where('parentUid', '==', profile.uid),
@@ -102,7 +112,25 @@ export const ParentDashboard: React.FC<{ onStartCall?: (channel: string, receive
     );
     
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      setActiveAlerts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as SOSAlert)));
+      const alerts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as SOSAlert));
+      setActiveAlerts(alerts);
+      
+      if (alerts.length > 0) {
+        toast.error(`SOS ALERT: ${alerts.length} active emergency!`, {
+          duration: 10000,
+          position: 'top-center',
+        });
+
+        // Browser notification
+        if ("Notification" in window && Notification.permission === "granted") {
+          new Notification("EMERGENCY: SOS Alert Active!", {
+            body: "Your child has triggered an SOS alert. Please check their location immediately.",
+            icon: "/pwa-192x192.png",
+            tag: "sos-alert",
+            requireInteraction: true
+          });
+        }
+      }
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'sos_alerts', user || undefined);
     });
@@ -218,7 +246,7 @@ export const ParentDashboard: React.FC<{ onStartCall?: (channel: string, receive
             </div>
             <div className="flex items-center gap-2">
               <button 
-                onClick={() => onStartCall?.(`sos_${alert.childUid}`)}
+                onClick={() => onStartCall?.(`sos_${alert.childUid}`, alert.childUid, alert.childName || 'Child')}
                 className="px-6 py-2 bg-white text-red-600 rounded-xl font-bold text-sm shadow-lg"
               >
                 Track Now
@@ -309,9 +337,17 @@ export const ParentDashboard: React.FC<{ onStartCall?: (channel: string, receive
         <div className="lg:col-span-2 space-y-8">
           {/* Real-time Tracking */}
           <section className="space-y-4">
-            <div className="flex items-center gap-2 font-bold text-slate-900 dark:text-white">
-              <MapPin className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-              Live Location Tracking
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 font-bold text-slate-900 dark:text-white">
+                <MapPin className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                Live Location Tracking
+              </div>
+              <button 
+                onClick={() => setActiveModal('link-child')}
+                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-100 dark:shadow-none"
+              >
+                <Plus className="w-4 h-4" /> Link Child
+              </button>
             </div>
             <div className="grid grid-cols-1 gap-6">
               {children.map(child => (
@@ -454,48 +490,65 @@ export const ParentDashboard: React.FC<{ onStartCall?: (channel: string, receive
               initial={{ scale: 0.9, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              className="relative bg-white dark:bg-slate-900 w-full max-w-4xl h-[80vh] rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col md:flex-row"
+              className="relative bg-white dark:bg-slate-900 w-full max-w-5xl h-[80vh] rounded-[2.5rem] shadow-2xl overflow-hidden"
             >
-              <div className="w-full md:w-80 border-r border-slate-100 dark:border-slate-800 flex flex-col">
-                <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center">
-                  <h3 className="text-xl font-black text-slate-900 dark:text-white">Contacts</h3>
-                  <button onClick={() => setActiveModal(null)} className="md:hidden p-2">
+              <button 
+                onClick={() => setActiveModal(null)} 
+                className="absolute top-6 right-6 z-[120] p-2 bg-slate-100 dark:bg-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-full transition-all"
+              >
+                <X className="w-6 h-6" />
+              </button>
+              <PrivateMessaging />
+            </motion.div>
+          </div>
+        )}
+        {activeModal === 'link-child' && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              className="bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-2xl w-full max-w-md overflow-hidden border border-slate-100 dark:border-slate-800"
+            >
+              <div className="p-8">
+                <div className="flex justify-between items-center mb-6">
+                  <h3 className="text-xl font-bold text-slate-900 dark:text-white">Link New Child</h3>
+                  <button onClick={() => setActiveModal(null)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors">
                     <X className="w-6 h-6 text-slate-400" />
                   </button>
                 </div>
-                <div className="flex-1 overflow-hidden">
-                  <ContactList 
-                    onSelect={(c) => setSelectedContact({ uid: c.uid, displayName: c.displayName })} 
-                    selectedId={selectedContact?.uid} 
-                  />
-                </div>
-              </div>
 
-              <div className="flex-1 flex flex-col bg-slate-50 dark:bg-slate-950/50">
-                {selectedContact ? (
-                  <>
-                    <div className="p-4 border-b border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 flex justify-between items-center">
-                      <div>
-                        <h4 className="font-bold text-slate-900 dark:text-white">{selectedContact.displayName}</h4>
-                        <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Active Chat</p>
-                      </div>
-                      <button onClick={() => setActiveModal(null)} className="hidden md:block p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors">
-                        <X className="w-6 h-6 text-slate-400" />
-                      </button>
+                <div className="space-y-6 text-center">
+                  <div className="bg-slate-50 dark:bg-slate-950 p-8 rounded-3xl flex flex-col items-center gap-4">
+                    <div className="bg-white p-4 rounded-2xl shadow-sm">
+                      <QRCodeCanvas 
+                        value={JSON.stringify({ type: 'link-parent', parentId: profile?.uid })} 
+                        size={180}
+                        level="H"
+                        includeMargin
+                      />
                     </div>
-                    <div className="flex-1 overflow-hidden">
-                      <Chat receiverId={selectedContact.uid} receiverName={selectedContact.displayName} />
-                    </div>
-                  </>
-                ) : (
-                  <div className="flex-1 flex flex-col items-center justify-center p-12 text-center">
-                    <div className="w-16 h-16 bg-white dark:bg-slate-900 rounded-3xl shadow-sm flex items-center justify-center mb-4">
-                      <MessageSquare className="w-8 h-8 text-slate-200" />
-                    </div>
-                    <h4 className="font-bold text-slate-900 dark:text-white mb-2">Select a Contact</h4>
-                    <p className="text-sm text-slate-500 max-w-xs">Choose a teacher or administrator from the list to start messaging.</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Ask your child to scan this QR code from their dashboard to link accounts.
+                    </p>
                   </div>
-                )}
+
+                  <div className="relative">
+                    <div className="absolute inset-0 flex items-center">
+                      <div className="w-full border-t border-slate-100 dark:border-slate-800"></div>
+                    </div>
+                    <div className="relative flex justify-center text-xs uppercase">
+                      <span className="bg-white dark:bg-slate-900 px-4 text-slate-400 font-black tracking-widest">OR USE CODE</span>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-2xl font-mono text-2xl font-bold tracking-widest text-blue-600 dark:text-blue-400">
+                    {profile?.uid?.slice(-6).toUpperCase()}
+                  </div>
+
+                  <p className="text-[10px] text-slate-400 uppercase font-black tracking-widest">
+                    Your unique parent ID
+                  </p>
+                </div>
               </div>
             </motion.div>
           </div>

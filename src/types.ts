@@ -86,6 +86,7 @@ export interface Assignment {
 export interface SOSAlert {
   id: string;
   childUid: string;
+  childName?: string;
   parentUid: string;
   location: {
     lat: number;

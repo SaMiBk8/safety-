@@ -48,19 +48,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             email: user.email || '',
             displayName: user.displayName || '',
             status: 'active',
-            role: 'system_admin',
+            role: 'visitor',
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp()
           });
-        } else if (isPrimaryAdmin) {
-          const currentRole = docSnap.data()?.role;
-          if (!currentRole || currentRole === 'visitor') {
-            await setDoc(profileRef, {
-              role: 'system_admin',
-              status: 'active',
-              updatedAt: serverTimestamp()
-            }, { merge: true });
-          }
         }
       }
     } catch (error) {
@@ -97,26 +88,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               uid: firebaseUser.uid,
               email: firebaseUser.email || '',
               displayName: firebaseUser.displayName || '',
-              status: isPrimaryAdmin ? 'active' : 'pending',
+              status: 'active',
               createdAt: serverTimestamp(),
               updatedAt: serverTimestamp(),
-              role: isPrimaryAdmin ? 'system_admin' : 'visitor'
+              role: 'visitor'
             };
             
             console.log('Creating new profile:', newProfile);
             await setDoc(profileRef, newProfile);
-          } else {
-            const currentProfile = docSnap.data() as UserProfile;
-            // Only auto-upgrade if they are a visitor or have no role
-            const canUpgrade = !currentProfile.role || currentProfile.role === 'visitor';
-            if (isPrimaryAdmin && canUpgrade) {
-              console.log('Upgrading existing profile to admin');
-              await setDoc(profileRef, {
-                role: 'system_admin',
-                status: 'active',
-                updatedAt: serverTimestamp()
-              }, { merge: true });
-            }
           }
         } catch (error) {
           handleFirestoreError(error, OperationType.GET, `users/${firebaseUser.uid}`, firebaseUser);

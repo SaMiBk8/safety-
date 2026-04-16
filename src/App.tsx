@@ -42,7 +42,35 @@ const Login = ({ isDarkMode, setIsDarkMode }: { isDarkMode: boolean, setIsDarkMo
     }
   };
 
-  if (loading) return <div className="flex items-center justify-center min-h-screen font-sans">Loading...</div>;
+  if (loading) return (
+    <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50 dark:bg-slate-950 font-sans">
+      <motion.div
+        animate={{ 
+          scale: [1, 1.1, 1],
+          rotate: [0, 5, -5, 0]
+        }}
+        transition={{ duration: 2, repeat: Infinity }}
+        className="w-20 h-20 bg-blue-600 rounded-[2rem] flex items-center justify-center shadow-2xl shadow-blue-200 dark:shadow-none mb-6"
+      >
+        <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+        </svg>
+      </motion.div>
+      <div className="space-y-2 text-center">
+        <h2 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">SafeChild</h2>
+        <div className="flex items-center gap-1 justify-center">
+          {[0, 1, 2].map((i) => (
+            <motion.div
+              key={i}
+              animate={{ opacity: [0.3, 1, 0.3] }}
+              transition={{ duration: 1, repeat: Infinity, delay: i * 0.2 }}
+              className="w-1.5 h-1.5 bg-blue-600 rounded-full"
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
   if (user) return <Navigate to="/dashboard" />;
 
   return (
@@ -174,20 +202,22 @@ const Dashboard = ({ isDarkMode, setIsDarkMode }: { isDarkMode: boolean, setIsDa
     }
   };
 
-  const startCall = async (channel: string, receiverId: string, receiverName: string) => {
-    try {
-      await addDoc(collection(db, 'calls'), {
-        callerId: user?.uid,
-        callerName: user?.displayName || 'Parent',
-        receiverId,
-        channel,
-        status: 'pending',
-        createdAt: serverTimestamp()
-      });
-      setActiveCall({ channel });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'calls', user || undefined);
+  const startCall = async (channel: string, receiverId?: string, receiverName?: string) => {
+    if (receiverId) {
+      try {
+        await addDoc(collection(db, 'calls'), {
+          callerId: user?.uid,
+          callerName: user?.displayName || 'User',
+          receiverId,
+          channel,
+          status: 'pending',
+          createdAt: serverTimestamp()
+        });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.CREATE, 'calls', user || undefined);
+      }
     }
+    setActiveCall({ channel });
   };
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [showInstallBanner, setShowInstallBanner] = useState(false);
@@ -230,39 +260,44 @@ const Dashboard = ({ isDarkMode, setIsDarkMode }: { isDarkMode: boolean, setIsDa
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 font-sans transition-colors duration-300">
-      <nav className="bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800 px-8 py-4 sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-100 dark:shadow-none">
-              <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-              </svg>
-            </div>
-            <span className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">SafeChild</span>
-          </div>
-          
-          <div className="flex items-center gap-4 sm:gap-6">
-            <button 
-              onClick={() => setIsDarkMode(!isDarkMode)}
-              className="p-2 text-slate-400 hover:text-blue-600 dark:hover:text-amber-400 rounded-xl transition-all"
-            >
-              {isDarkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-            </button>
-
-            <div className="text-right hidden sm:block">
-              <div className="text-sm font-bold text-slate-900 dark:text-white">{user.displayName}</div>
-              <div className="text-xs text-blue-600 dark:text-blue-400 font-semibold capitalize">{profile?.role?.replace('_', ' ') || 'Guest'}</div>
+      <nav className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border-b border-slate-100 dark:border-slate-800 sticky top-0 z-50 transition-colors duration-300">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between h-20 items-center">
+            <div className="flex items-center gap-3 group cursor-pointer">
+              <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-100 dark:shadow-none group-hover:rotate-6 transition-transform">
+                <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                </svg>
+              </div>
+              <div className="hidden sm:block">
+                <span className="text-xl font-black text-slate-900 dark:text-white tracking-tighter">SafeChild</span>
+                <p className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-widest leading-none">Professional</p>
+              </div>
             </div>
             
-            <button 
-              onClick={() => signOut(auth)}
-              className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-all"
-              title="Sign Out"
-            >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-              </svg>
-            </button>
+            <div className="flex items-center gap-4">
+              <button 
+                onClick={() => setIsDarkMode(!isDarkMode)}
+                className="p-2.5 bg-slate-50 dark:bg-slate-800 text-slate-400 hover:text-blue-600 dark:hover:text-amber-400 rounded-xl transition-all active:scale-90"
+              >
+                {isDarkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+              </button>
+              
+              <div className="h-8 w-px bg-slate-100 dark:bg-slate-800 mx-1" />
+              
+              <div className="flex items-center gap-3 pl-1">
+                <div className="hidden md:block text-right">
+                  <p className="text-sm font-black text-slate-900 dark:text-white leading-none">{user?.displayName}</p>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-1">{profile?.role?.replace('_', ' ')}</p>
+                </div>
+                <button 
+                  onClick={() => signOut(auth)}
+                  className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-xl text-xs font-black hover:bg-red-50 dark:hover:bg-red-900/20 hover:text-red-600 dark:hover:text-red-400 transition-all active:scale-95"
+                >
+                  Sign Out
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </nav>
@@ -419,6 +454,8 @@ const Dashboard = ({ isDarkMode, setIsDarkMode }: { isDarkMode: boolean, setIsDa
   );
 };
 
+import { Toaster } from 'sonner';
+
 export default function App() {
   const [isSplashVisible, setIsSplashVisible] = useState(true);
   const [isDarkMode, setIsDarkMode] = useState(() => {
@@ -479,6 +516,7 @@ export default function App() {
 
   return (
     <AuthProvider>
+      <Toaster position="top-center" richColors />
       <Router>
         <AnimatePresence mode="wait">
           <Routes>

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { collection, query, where, onSnapshot, addDoc, serverTimestamp, updateDoc, doc, getDoc, orderBy, arrayUnion } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { ref, uploadBytes, getDownloadURL, uploadBytesResumable } from 'firebase/storage';
 import { db, storage } from '../../lib/firebase';
 import { useAuth } from '../../context/AuthContext';
 import { Student, Announcement } from '../../types';
@@ -10,6 +10,7 @@ import { handleFirestoreError, OperationType } from '../../lib/firestore-errors'
 import { Chat } from '../Chat';
 import { ContactList } from '../ContactList';
 import { FeedbackModal } from '../FeedbackModal';
+import { PrivateMessaging } from '../PrivateMessaging';
 
 export const TeacherDashboard: React.FC = () => {
   const { user, profile } = useAuth();
@@ -115,11 +116,10 @@ export const TeacherDashboard: React.FC = () => {
     // Query all submissions for the school so teachers can see any student's work
     const q = query(
       collection(db, 'homework_submissions'), 
-      where('schoolId', '==', profile.schoolId),
-      orderBy('submittedAt', 'desc')
+      where('schoolId', '==', profile.schoolId)
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      setSubmissions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      setSubmissions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a: any, b: any) => b.submittedAt?.seconds - a.submittedAt?.seconds));
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'homework_submissions', user || undefined);
     });
@@ -128,7 +128,11 @@ export const TeacherDashboard: React.FC = () => {
 
   const handleUpdateSubmissionStatus = async (id: string, currentStatus: string) => {
     try {
-      const newStatus = currentStatus === 'pending' ? 'reviewed' : 'pending';
+      let newStatus = 'reviewed';
+      if (currentStatus === 'reviewed') {
+        newStatus = 'submitted';
+      }
+      
       await updateDoc(doc(db, 'homework_submissions', id), {
         status: newStatus,
         updatedAt: serverTimestamp()
@@ -143,11 +147,10 @@ export const TeacherDashboard: React.FC = () => {
     const q = query(
       collection(db, 'assignments'),
       where('schoolId', '==', profile.schoolId),
-      where('teacherId', '==', profile.uid),
-      orderBy('createdAt', 'desc')
+      where('teacherId', '==', profile.uid)
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      setAssignments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      setAssignments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a: any, b: any) => b.createdAt?.seconds - a.createdAt?.seconds));
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'assignments', user || undefined);
     });
@@ -242,8 +245,30 @@ export const TeacherDashboard: React.FC = () => {
 
       if (annFile) {
         const storageRef = ref(storage, `announcements/${profile.schoolId}/${Date.now()}_${annFile.name}`);
-        await uploadBytes(storageRef, annFile);
-        fileUrl = await getDownloadURL(storageRef);
+        const uploadTask = uploadBytesResumable(storageRef, annFile);
+        
+        fileUrl = await new Promise((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            uploadTask.cancel();
+            reject(new Error("Upload timed out after 10 minutes."));
+          }, 600000);
+
+          uploadTask.on('state_changed', null, 
+            (error: any) => {
+              clearTimeout(timeout);
+              if (error.code === 'storage/retry-limit-exceeded') {
+                reject(new Error("Connection lost multiple times. Please check your internet."));
+              } else {
+                reject(error);
+              }
+            }, 
+            async () => {
+              clearTimeout(timeout);
+              const url = await getDownloadURL(uploadTask.snapshot.ref);
+              resolve(url);
+            }
+          );
+        });
         fileName = annFile.name;
       }
 
@@ -319,78 +344,54 @@ export const TeacherDashboard: React.FC = () => {
 
   return (
     <div className="space-y-8">
-      <header className="flex items-center justify-between">
+      <header className="flex items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Teacher Dashboard</h2>
-          <p className="text-slate-500 dark:text-slate-400">Manage your students and academic progress</p>
+          <h2 className="text-2xl md:text-3xl font-black text-slate-900 dark:text-white tracking-tight">Teacher Dashboard</h2>
+          <p className="text-slate-500 dark:text-slate-400 font-medium">Manage your students and academic progress</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-3">
           <button 
             onClick={exportAnnouncements}
-            className="flex items-center gap-2 px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-xl font-semibold hover:bg-slate-200 transition-all"
+            className="hidden sm:flex items-center gap-2 px-5 py-2.5 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 rounded-2xl font-black text-xs hover:bg-slate-50 dark:hover:bg-slate-800 transition-all shadow-sm border border-slate-100 dark:border-slate-800 active:scale-95"
           >
             <FileText className="w-4 h-4" />
             Export CSV
           </button>
-          <div className="bg-emerald-100 dark:bg-emerald-900/30 p-3 rounded-2xl">
+          <div className="bg-emerald-100 dark:bg-emerald-900/30 p-3 rounded-2xl shadow-inner">
             <GraduationCap className="w-6 h-6 text-emerald-600 dark:text-emerald-400" />
           </div>
         </div>
       </header>
 
-      <div className="flex gap-6 border-b border-slate-100 dark:border-slate-800 mb-8 overflow-x-auto whitespace-nowrap pb-px scrollbar-hide">
-        <button 
-          onClick={() => setActiveTab('students')}
-          className={`pb-4 px-2 text-sm font-bold transition-all relative shrink-0 ${
-            activeTab === 'students' ? 'text-blue-600' : 'text-slate-400'
-          }`}
-        >
-          Students & Classes
-          {activeTab === 'students' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
-        </button>
-        <button 
-          onClick={() => setActiveTab('messenger')}
-          className={`pb-4 px-2 text-sm font-bold transition-all relative shrink-0 ${
-            activeTab === 'messenger' ? 'text-blue-600' : 'text-slate-400'
-          }`}
-        >
-          <div className="flex items-center gap-2">
-            Messenger
-            {unreadTotal > 0 && (
-              <span className="bg-red-500 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full animate-bounce">
-                {unreadTotal}
+      <div className="flex gap-8 border-b border-slate-100 dark:border-slate-800 mb-8 overflow-x-auto whitespace-nowrap pb-px scrollbar-hide">
+        {[
+          { id: 'students', label: 'Students & Classes' },
+          { id: 'messenger', label: 'Messenger', badge: unreadTotal },
+          { id: 'submissions', label: 'Submissions' },
+          { id: 'announcements', label: 'Announcements' },
+          { id: 'assignments', label: 'Assignments' },
+        ].map((tab) => (
+          <button 
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id as any)}
+            className={`pb-4 px-1 text-sm font-black transition-all relative shrink-0 flex items-center gap-2 ${
+              activeTab === tab.id ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
+            }`}
+          >
+            {tab.label}
+            {tab.badge !== undefined && tab.badge > 0 && (
+              <span className="bg-red-500 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full animate-bounce shadow-lg">
+                {tab.badge}
               </span>
             )}
-          </div>
-          {activeTab === 'messenger' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
-        </button>
-        <button 
-          onClick={() => setActiveTab('submissions')}
-          className={`pb-4 px-2 text-sm font-bold transition-all relative shrink-0 ${
-            activeTab === 'submissions' ? 'text-blue-600' : 'text-slate-400'
-          }`}
-        >
-          Submissions
-          {activeTab === 'submissions' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
-        </button>
-        <button 
-          onClick={() => setActiveTab('announcements' as any)}
-          className={`pb-4 px-2 text-sm font-bold transition-all relative shrink-0 ${
-            activeTab === ('announcements' as any) ? 'text-blue-600' : 'text-slate-400'
-          }`}
-        >
-          Announcements
-          {activeTab === ('announcements' as any) && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
-        </button>
-        <button 
-          onClick={() => setActiveTab('assignments' as any)}
-          className={`pb-4 px-2 text-sm font-bold transition-all relative shrink-0 ${
-            activeTab === ('assignments' as any) ? 'text-blue-600' : 'text-slate-400'
-          }`}
-        >
-          Assignments
-          {activeTab === ('assignments' as any) && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
-        </button>
+            {activeTab === tab.id && (
+              <motion.div 
+                layoutId="tab-teacher" 
+                className="absolute bottom-0 left-0 right-0 h-1 bg-blue-600 rounded-full" 
+              />
+            )}
+          </button>
+        ))}
       </div>
 
       {activeTab === 'students' ? (
@@ -590,12 +591,15 @@ export const TeacherDashboard: React.FC = () => {
                 Recent Submissions
               </h3>
               <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2">
-                {submissions.map((sub) => (
-                  <div key={sub.id} className="p-3 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-800">
+                {submissions
+                  .filter(s => viewMode === 'all' || s.teacherId === profile?.uid)
+                  .slice(0, 10)
+                  .map((sub) => (
+                    <div key={sub.id} className="p-3 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-800">
                     <div className="flex justify-between items-start mb-1">
                       <span className="text-xs font-bold text-slate-900 dark:text-white line-clamp-1">{sub.title}</span>
                       <span className={`text-[8px] font-black uppercase px-1.5 py-0.5 rounded ${
-                        sub.status === 'pending' ? 'bg-amber-100 text-amber-600' : 'bg-emerald-100 text-emerald-600'
+                        sub.status === 'submitted' ? 'bg-amber-100 text-amber-600' : 'bg-emerald-100 text-emerald-600'
                       }`}>
                         {sub.status}
                       </span>
@@ -626,56 +630,7 @@ export const TeacherDashboard: React.FC = () => {
           </div>
         </div>
       ) : activeTab === 'messenger' ? (
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
-          <div className="lg:col-span-1 space-y-4">
-            <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm overflow-hidden h-[600px] flex flex-col">
-              <div className="flex-1 overflow-hidden">
-                <ContactList 
-                  onSelect={(c) => setSelectedContact({ uid: c.uid, displayName: c.displayName })} 
-                  selectedId={selectedContact?.uid} 
-                />
-              </div>
-              <div className="p-4 border-t border-slate-100 dark:border-slate-800">
-                <button
-                  onClick={() => {
-                    if (selectedContact) {
-                      setSelectedContactForFeedback({ uid: selectedContact.uid, name: selectedContact.displayName });
-                      setActiveTab('feedback');
-                    }
-                  }}
-                  disabled={!selectedContact}
-                  className="w-full py-3 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-xl text-xs font-bold hover:bg-slate-200 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
-                >
-                  <MessageSquare className="w-4 h-4" />
-                  Give Feedback
-                </button>
-              </div>
-            </div>
-          </div>
-          <div className="lg:col-span-3">
-            <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm overflow-hidden min-h-[600px] flex flex-col">
-              {selectedContact ? (
-                <div className="flex flex-col h-full flex-1">
-                  <div className="p-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/50">
-                    <h4 className="font-bold text-slate-900 dark:text-white">{selectedContact.displayName}</h4>
-                    <p className="text-[10px] text-slate-400 uppercase font-black">Active Chat</p>
-                  </div>
-                  <div className="flex-1">
-                    <Chat receiverId={selectedContact.uid} receiverName={selectedContact.displayName} />
-                  </div>
-                </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center h-full p-12 text-center flex-1">
-                  <div className="w-16 h-16 bg-slate-50 dark:bg-slate-800 rounded-full flex items-center justify-center mb-4">
-                    <MessageSquare className="w-8 h-8 text-slate-300" />
-                  </div>
-                  <h4 className="font-bold text-slate-900 dark:text-white mb-2">Messenger</h4>
-                  <p className="text-sm text-slate-500 max-w-xs">Select a contact from the list to start a conversation.</p>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
+        <PrivateMessaging />
       ) : activeTab === 'submissions' ? (
         <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm overflow-hidden">
           <table className="w-full text-left border-collapse">
@@ -689,8 +644,10 @@ export const TeacherDashboard: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
-              {submissions.map((sub) => (
-                <tr key={sub.id}>
+              {submissions
+                .filter(s => viewMode === 'all' || s.teacherId === profile?.uid)
+                .map((sub) => (
+                  <tr key={sub.id}>
                   <td className="p-4 font-bold text-slate-900 dark:text-white">{sub.studentName}</td>
                   <td className="p-4">
                     <div className="text-slate-900 dark:text-white font-medium">{sub.title}</div>
@@ -699,7 +656,7 @@ export const TeacherDashboard: React.FC = () => {
                   <td className="p-4 text-xs text-slate-500">{sub.submittedAt?.toDate()?.toLocaleString() || 'Pending...'}</td>
                   <td className="p-4">
                     <span className={`text-[10px] font-black uppercase px-2 py-1 rounded-full ${
-                      sub.status === 'pending' ? 'bg-amber-100 text-amber-600' : 'bg-emerald-100 text-emerald-600'
+                      sub.status === 'submitted' ? 'bg-amber-100 text-amber-600' : 'bg-emerald-100 text-emerald-600'
                     }`}>
                       {sub.status}
                     </span>
@@ -713,10 +670,10 @@ export const TeacherDashboard: React.FC = () => {
                     <button 
                       onClick={() => handleUpdateSubmissionStatus(sub.id, sub.status)}
                       className={`px-3 py-1 rounded-lg text-[10px] font-bold transition-colors ${
-                        sub.status === 'pending' ? 'bg-emerald-500 text-white hover:bg-emerald-600' : 'bg-slate-200 text-slate-600 hover:bg-slate-300'
+                        sub.status === 'submitted' ? 'bg-emerald-500 text-white hover:bg-emerald-600' : 'bg-slate-200 text-slate-600 hover:bg-slate-300'
                       }`}
                     >
-                      {sub.status === 'pending' ? 'Mark Reviewed' : 'Undo'}
+                      {sub.status === 'submitted' ? 'Mark Reviewed' : 'Undo'}
                     </button>
                   </td>
                 </tr>

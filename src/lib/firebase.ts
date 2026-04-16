@@ -9,6 +9,6 @@ export const auth = getAuth(app);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const storage = getStorage(app, firebaseConfig.storageBucket);
 
-// Increase retry limits (default is 10 minutes, we'll set it to 15)
-storage.maxUploadRetryTime = 900000; // 15 minutes
-storage.maxOperationRetryTime = 900000; // 15 minutes
+// Increase retry limits (default is 10 minutes)
+storage.maxUploadRetryTime = 600000; // 10 minutes
+storage.maxOperationRetryTime = 600000; // 10 minutes

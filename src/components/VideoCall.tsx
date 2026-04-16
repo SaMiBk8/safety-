@@ -20,111 +20,170 @@ export const VideoCall: React.FC<VideoCallProps> = ({ appId, channel, token, uid
   const [error, setError] = useState<string | null>(null);
 
   const localVideoRef = useRef<HTMLDivElement>(null);
+  const isInitializing = useRef(false);
 
   useEffect(() => {
+    let mounted = true;
+    let agoraClient: IAgoraRTCClient | null = null;
+    let audioTrack: IMicrophoneAudioTrack | null = null;
+    let videoTrack: ICameraVideoTrack | null = null;
+
     const init = async () => {
-      const agoraClient = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' });
-      setClient(agoraClient);
-
-      const trimmedAppId = appId?.trim();
-
-      agoraClient.on('user-published', async (user, mediaType) => {
-        await agoraClient.subscribe(user, mediaType);
-        if (mediaType === 'video') {
-          setRemoteUsers((prev) => [...prev, user]);
-        }
-        if (mediaType === 'audio') {
-          user.audioTrack?.play();
-        }
-      });
-
-      agoraClient.on('user-unpublished', (user) => {
-        setRemoteUsers((prev) => prev.filter((u) => u.uid !== user.uid));
-      });
-
       try {
-        if (!trimmedAppId) {
-          throw new Error('Agora App ID is missing. Please check your environment variables.');
+        agoraClient = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' });
+        if (!mounted) return;
+        setClient(agoraClient);
+
+        const trimmedAppId = appId?.trim();
+        if (!trimmedAppId || trimmedAppId === 'YOUR_AGORA_APP_ID') {
+          throw new Error('Agora App ID is missing or invalid. Please set VITE_AGORA_APP_ID in the Secrets panel.');
         }
-        console.log('Initializing Agora with App ID:', trimmedAppId.substring(0, 5) + '...');
+
+        agoraClient.on('user-published', async (user, mediaType) => {
+          if (!mounted) return;
+          try {
+            await agoraClient!.subscribe(user, mediaType);
+            if (mediaType === 'video') {
+              setRemoteUsers((prev) => {
+                if (prev.find(u => u.uid === user.uid)) return prev;
+                return [...prev, user];
+              });
+            }
+            if (mediaType === 'audio') user.audioTrack?.play();
+          } catch (e) {
+            console.error('Subscription failed:', e);
+          }
+        });
+
+        agoraClient.on('user-unpublished', (user, mediaType) => {
+          if (mediaType === 'video') {
+            setRemoteUsers((prev) => prev.filter((u) => u.uid !== user.uid));
+          }
+        });
+
+        agoraClient.on('user-left', (user) => {
+          setRemoteUsers((prev) => prev.filter((u) => u.uid !== user.uid));
+        });
 
         let activeToken = token;
+        const isInvalidToken = !activeToken || 
+                              activeToken === 'MY_AGORA_TOKEN' || 
+                              activeToken === 'undefined' || 
+                              activeToken === 'null' ||
+                              activeToken.length < 20;
+
+        if (isInvalidToken) activeToken = undefined;
         
-        // If token is a placeholder or empty, ignore it
-        if (!activeToken || activeToken === 'MY_AGORA_TOKEN' || activeToken === 'undefined' || activeToken === 'null') {
-          activeToken = undefined;
-        }
-        
-        // If no token is provided, try to fetch one from our backend
         if (!activeToken) {
           try {
-            console.log('Fetching Agora token from backend for channel:', channel);
-            const response = await fetch(`/api/agora/token?channelName=${encodeURIComponent(channel)}`);
-            
-            if (!response.ok) {
-              const errorData = await response.json();
-              console.error('Token server error:', errorData);
-              throw new Error(errorData.error || `Server returned ${response.status}`);
+            // Add timestamp to prevent caching
+            const response = await fetch(`/api/agora/token?channelName=${encodeURIComponent(channel)}&t=${Date.now()}`);
+            if (response.ok) {
+              const data = await response.json();
+              activeToken = data.token || undefined;
             }
-
-            const data = await response.json();
-            if (data.token) {
-              console.log('Successfully received token from backend. Length:', data.token.length);
-              console.log('Token (first 10 chars):', data.token.substring(0, 10));
-              activeToken = data.token;
-            } else {
-              throw new Error('Token missing in server response');
-            }
-          } catch (e: any) {
-            console.error('Failed to fetch token from backend:', e);
-            setError(`Security Token Error: ${e.message}. Please ensure AGORA_APP_CERTIFICATE is set in the Secrets panel.`);
-            return;
+          } catch (e) {
+            console.error('Token fetch failed:', e);
           }
         }
 
-        console.log('Joining Agora channel:', channel, 'with AppID:', trimmedAppId.substring(0, 5) + '...', 'UID: 0');
-        await agoraClient.join(trimmedAppId, channel, activeToken, 0);
-        const audioTrack = await AgoraRTC.createMicrophoneAudioTrack();
-        const videoTrack = await AgoraRTC.createCameraVideoTrack();
+        if (!mounted) return;
+
+        // Join with a timeout to prevent hanging
+        try {
+          console.log(`Joining Agora channel: ${channel} with AppID: ${trimmedAppId.substring(0, 5)}...`);
+          const joinPromise = agoraClient.join(trimmedAppId, channel, activeToken || null, 0);
+          const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Connection timeout. Please check your internet or Agora configuration.')), 15000)
+          );
+
+          await Promise.race([joinPromise, timeoutPromise]);
+        } catch (joinErr: any) {
+          if (joinErr.message === 'OPERATION_ABORTED' || !mounted) return;
+          
+          // Smart Fallback: If join with token fails with a timeout or certificate error, 
+          // try joining WITHOUT a token (in case App Certificate is disabled)
+          const isTokenError = joinErr.message?.includes('token') || 
+                               joinErr.message?.includes('timeout') || 
+                               joinErr.code === 'CAN_NOT_GET_GATEWAY_SERVER';
+          
+          if (isTokenError && activeToken) {
+            console.warn('Join with token failed, attempting fallback join without token...');
+            try {
+              await agoraClient.join(trimmedAppId, channel, null, 0);
+              console.log('Fallback join successful!');
+            } catch (fallbackErr: any) {
+              console.error('Fallback join also failed:', fallbackErr);
+              throw joinErr; // Throw original error if fallback also fails
+            }
+          } else {
+            throw joinErr;
+          }
+        }
         
-        setLocalAudioTrack(audioTrack);
-        setLocalVideoTrack(videoTrack);
-
-        if (localVideoRef.current) {
-          videoTrack.play(localVideoRef.current);
+        if (!mounted) {
+          agoraClient.leave();
+          return;
         }
 
-        await agoraClient.publish([audioTrack, videoTrack]);
+        audioTrack = await AgoraRTC.createMicrophoneAudioTrack().catch(e => {
+          console.warn('Microphone access denied:', e);
+          return null;
+        });
+        
+        videoTrack = await AgoraRTC.createCameraVideoTrack().catch(e => {
+          console.warn('Camera access denied:', e);
+          return null;
+        });
+        
+        if (!mounted) {
+          audioTrack?.close();
+          videoTrack?.close();
+          agoraClient.leave();
+          return;
+        }
+
+        if (audioTrack) setLocalAudioTrack(audioTrack);
+        if (videoTrack) {
+          setLocalVideoTrack(videoTrack);
+          if (localVideoRef.current) videoTrack.play(localVideoRef.current);
+        }
+
+        const tracksToPublish = [audioTrack, videoTrack].filter(t => t !== null) as any[];
+        if (tracksToPublish.length > 0 && mounted) {
+          await agoraClient.publish(tracksToPublish);
+        }
       } catch (err: any) {
+        if (!mounted || err.message === 'OPERATION_ABORTED') return;
         console.error('Agora init failed:', err);
-        if (err.message?.includes('dynamic use static key') || err.message?.includes('dynamic key or token timeout')) {
-          const tokenStatus = token ? 'The provided token may be expired or invalid.' : 'No token was provided (VITE_AGORA_TOKEN is empty).';
-          setError(`
-            Agora Authentication Error:
-            Your Agora project has "App Certificate" enabled, which requires a security token.
-            
-            How to fix:
-            1. Go to the Agora Console (console.agora.io).
-            2. Find your project and either:
-               a) Disable "App Certificate" (easiest for testing).
-               b) Generate a temporary token and add it as VITE_AGORA_TOKEN in the app secrets.
-            
-            Current Status: ${tokenStatus}
-          `);
-        } else {
-          setError(err.message || 'Failed to initialize video call');
+        
+        let msg = err.message || 'Failed to initialize video call';
+        if (msg.includes('CAN_NOT_GET_GATEWAY_SERVER') || msg.includes('token') || msg.includes('dynamic key')) {
+          msg = 'Security token error. This usually happens if the Agora App ID or Certificate is incorrect, or if the token has expired. Please check your Secrets panel.';
+        } else if (msg.includes('timeout')) {
+          msg = 'Connection timed out. Your network might be blocking the video stream (common on some public Wi-Fi).';
+        } else if (msg.includes('Permission denied')) {
+          msg = 'Camera or Microphone access was denied. Please check your browser permissions.';
         }
+        
+        setError(msg);
       }
     };
 
     init();
 
     return () => {
-      localAudioTrack?.close();
-      localVideoTrack?.close();
-      client?.leave();
+      mounted = false;
+      audioTrack?.stop();
+      audioTrack?.close();
+      videoTrack?.stop();
+      videoTrack?.close();
+      if (agoraClient) {
+        agoraClient.leave().catch(e => console.warn('Error leaving channel:', e));
+        agoraClient.removeAllListeners();
+      }
     };
-  }, [appId, channel, token, uid]);
+  }, [appId, channel, token]);
 
   const toggleMute = () => {
     localAudioTrack?.setMuted(!isMuted);
@@ -148,28 +207,51 @@ export const VideoCall: React.FC<VideoCallProps> = ({ appId, channel, token, uid
             <p className="text-slate-400 text-sm leading-relaxed whitespace-pre-line">
               {error}
             </p>
-            <button 
-              onClick={onClose}
-              className="px-6 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl font-bold transition-all"
-            >
-              Close Call
-            </button>
+            <div className="flex gap-3 justify-center">
+              <button 
+                onClick={() => window.location.reload()}
+                className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold transition-all"
+              >
+                Retry
+              </button>
+              <button 
+                onClick={onClose}
+                className="px-6 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl font-bold transition-all"
+              >
+                Close
+              </button>
+            </div>
           </div>
         ) : (
           <>
             {/* Remote Videos */}
-            <div className="absolute inset-0 grid grid-cols-1 md:grid-cols-2 gap-2 p-2">
-              {remoteUsers.map((user) => (
-                <div key={user.uid} className="relative bg-slate-800 rounded-2xl overflow-hidden">
-                  <RemoteVideoPlayer user={user} />
-                  <div className="absolute bottom-4 left-4 bg-black/50 px-3 py-1 rounded-lg text-white text-xs font-bold">
-                    Remote User
+            <div className="absolute inset-0">
+              {remoteUsers.length === 0 ? (
+                <div className="w-full h-full flex flex-col items-center justify-center text-slate-500 bg-slate-900/50 backdrop-blur-sm">
+                  <div className="w-20 h-20 bg-white/5 rounded-full flex items-center justify-center mb-4 animate-pulse">
+                    <Video className="w-10 h-10 text-slate-700" />
+                  </div>
+                  <p className="font-medium">Waiting for other participant...</p>
+                  <p className="text-xs opacity-50 mt-1">They will appear here once they join</p>
+                </div>
+              ) : remoteUsers.length === 1 ? (
+                <div className="w-full h-full relative bg-slate-800">
+                  <RemoteVideoPlayer user={remoteUsers[0]} />
+                  <div className="absolute bottom-4 left-4 bg-black/40 backdrop-blur-md px-4 py-2 rounded-2xl text-white text-xs font-bold border border-white/10 flex items-center gap-2">
+                    <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
+                    Live Connection
                   </div>
                 </div>
-              ))}
-              {remoteUsers.length === 0 && (
-                <div className="flex items-center justify-center text-slate-500 italic">
-                  Waiting for other participant...
+              ) : (
+                <div className="w-full h-full grid grid-cols-2 gap-2 p-2 bg-slate-900">
+                  {remoteUsers.map((user) => (
+                    <div key={user.uid} className="relative bg-slate-800 rounded-2xl overflow-hidden border border-white/5">
+                      <RemoteVideoPlayer user={user} />
+                      <div className="absolute bottom-4 left-4 bg-black/50 px-3 py-1 rounded-lg text-white text-[10px] font-bold">
+                        Remote User
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>

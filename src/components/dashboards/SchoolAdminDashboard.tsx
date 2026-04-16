@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { collection, addDoc, query, where, onSnapshot, serverTimestamp, doc, updateDoc, orderBy, getDocs, arrayUnion } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../../lib/firebase';
 import { useAuth } from '../../context/AuthContext';
 import { Announcement, UserProfile } from '../../types';
@@ -8,6 +8,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Plus, Megaphone, Users, Calendar, CheckCircle2, X, Clock, FileText, MessageSquare, GraduationCap, Trash2 } from 'lucide-react';
 import { Chat } from '../Chat';
 import { ContactList } from '../ContactList';
+import { PrivateMessaging } from '../PrivateMessaging';
 import { FeedbackModal } from '../FeedbackModal';
 import { handleFirestoreError, OperationType } from '../../lib/firestore-errors';
 import { deleteDoc } from 'firebase/firestore';
@@ -242,8 +243,30 @@ export const SchoolAdminDashboard: React.FC = () => {
 
       if (selectedFile) {
         const storageRef = ref(storage, `announcements/${profile.schoolId}/${Date.now()}_${selectedFile.name}`);
-        await uploadBytes(storageRef, selectedFile);
-        fileUrl = await getDownloadURL(storageRef);
+        const uploadTask = uploadBytesResumable(storageRef, selectedFile);
+        
+        fileUrl = await new Promise((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            uploadTask.cancel();
+            reject(new Error("Upload timed out after 10 minutes."));
+          }, 600000);
+
+          uploadTask.on('state_changed', null, 
+            (error: any) => {
+              clearTimeout(timeout);
+              if (error.code === 'storage/retry-limit-exceeded') {
+                reject(new Error("Connection lost multiple times. Please check your internet."));
+              } else {
+                reject(error);
+              }
+            }, 
+            async () => {
+              clearTimeout(timeout);
+              const url = await getDownloadURL(uploadTask.snapshot.ref);
+              resolve(url);
+            }
+          );
+        });
         fileName = selectedFile.name;
       }
 
@@ -833,56 +856,7 @@ export const SchoolAdminDashboard: React.FC = () => {
           </table>
         </div>
       ) : activeTab === 'messenger' ? (
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
-          <div className="lg:col-span-1 space-y-4">
-            <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm overflow-hidden h-[600px] flex flex-col">
-              <div className="flex-1 overflow-hidden">
-                <ContactList 
-                  onSelect={(c) => setSelectedContact({ uid: c.uid, displayName: c.displayName } as any)} 
-                  selectedId={selectedContact?.uid} 
-                />
-              </div>
-              <div className="p-4 border-t border-slate-100 dark:border-slate-800">
-                <button
-                  onClick={() => {
-                    if (selectedContact) {
-                      setSelectedContactForFeedback({ uid: selectedContact.uid, name: selectedContact.displayName || '' });
-                      setActiveTab('feedback');
-                    }
-                  }}
-                  disabled={!selectedContact}
-                  className="w-full py-3 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-xl text-xs font-bold hover:bg-slate-200 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
-                >
-                  <MessageSquare className="w-4 h-4" />
-                  Give Feedback
-                </button>
-              </div>
-            </div>
-          </div>
-          <div className="lg:col-span-3">
-            <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm overflow-hidden min-h-[600px] flex flex-col">
-              {selectedContact ? (
-                <div className="flex flex-col h-full flex-1">
-                  <div className="p-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/50">
-                    <h4 className="font-bold text-slate-900 dark:text-white">{selectedContact.displayName}</h4>
-                    <p className="text-[10px] text-slate-400 uppercase font-black">{selectedContact.role}</p>
-                  </div>
-                  <div className="flex-1">
-                    <Chat receiverId={selectedContact.uid} receiverName={selectedContact.displayName || 'User'} />
-                  </div>
-                </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center h-full p-12 text-center flex-1">
-                  <div className="w-16 h-16 bg-slate-50 dark:bg-slate-800 rounded-full flex items-center justify-center mb-4">
-                    <MessageSquare className="w-8 h-8 text-slate-300" />
-                  </div>
-                  <h4 className="font-bold text-slate-900 dark:text-white mb-2">Your Messages</h4>
-                  <p className="text-sm text-slate-500 max-w-xs">Select a teacher or parent from the list to start a conversation.</p>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
+        <PrivateMessaging />
       ) : activeTab === 'requests' ? (
         <div className="space-y-4">
           {requests.map((req) => (

@@ -8,14 +8,34 @@ import { motion } from 'motion/react';
 import { Shield, MapPin, Clock, Phone, UserCheck, Calendar, Info, MessageSquare, Send, FileText, X, CheckCircle2 } from 'lucide-react';
 import { handleFirestoreError, OperationType } from '../../lib/firestore-errors';
 
+import { Chat } from '../Chat';
+import { ContactList } from '../ContactList';
+import { PrivateMessaging } from '../PrivateMessaging';
+
 export const AuthorizedPersonDashboard: React.FC = () => {
   const { user, profile } = useAuth();
   const [authorizedChildren, setAuthorizedChildren] = useState<Student[]>([]);
   const [schoolInfo, setSchoolInfo] = useState<any>(null);
-  const [isUploading, setIsUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [activeTab, setActiveTab] = useState<'info' | 'messenger'>('info');
+  const [selectedContact, setSelectedContact] = useState<{ uid: string, displayName: string } | null>(null);
+  const [unreadTotal, setUnreadTotal] = useState(0);
   const [messageToAdmin, setMessageToAdmin] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!profile?.uid) return;
+    const q = query(
+      collection(db, 'messages'),
+      where('receiverId', '==', profile.uid),
+      where('isRead', '==', false)
+    );
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setUnreadTotal(snapshot.size);
+    });
+    return () => unsubscribe();
+  }, [profile?.uid]);
 
   useEffect(() => {
     if (!profile?.uid) return;
@@ -56,13 +76,26 @@ export const AuthorizedPersonDashboard: React.FC = () => {
         const uploadTask = uploadBytesResumable(storageRef, selectedFile);
 
         await new Promise((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            uploadTask.cancel();
+            reject(new Error("Upload timed out after 10 minutes."));
+          }, 600000);
+
           uploadTask.on('state_changed',
             (snapshot) => {
               const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
               setUploadProgress(progress);
             },
-            (error) => reject(error),
+            (error: any) => {
+              clearTimeout(timeout);
+              if (error.code === 'storage/retry-limit-exceeded') {
+                reject(new Error("Connection lost multiple times. Please check your internet."));
+              } else {
+                reject(error);
+              }
+            },
             async () => {
+              clearTimeout(timeout);
               fileUrl = await getDownloadURL(uploadTask.snapshot.ref);
               fileName = selectedFile.name;
               resolve(null);
@@ -96,18 +129,47 @@ export const AuthorizedPersonDashboard: React.FC = () => {
   };
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 pb-20">
       <header className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Authorized Person Portal</h2>
-          <p className="text-slate-500 dark:text-slate-400">Secure pickup and authorization management</p>
+          <h2 className="text-3xl font-black text-slate-900 dark:text-white tracking-tight">Authorized Pickup</h2>
+          <p className="text-slate-500 dark:text-slate-400 font-medium">Verified access for student safety</p>
         </div>
-        <div className="bg-purple-100 dark:bg-purple-900/30 p-3 rounded-2xl">
-          <Shield className="w-6 h-6 text-purple-600 dark:text-purple-400" />
+        <div className="bg-blue-100 dark:bg-blue-900/30 p-3 rounded-2xl shadow-inner">
+          <Shield className="w-6 h-6 text-blue-600 dark:text-blue-400" />
         </div>
       </header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div className="flex gap-4 border-b border-slate-100 dark:border-slate-800 overflow-x-auto whitespace-nowrap pb-px scrollbar-hide">
+        <button 
+          onClick={() => setActiveTab('info')}
+          className={`pb-4 px-2 text-sm font-bold transition-all relative shrink-0 ${
+            activeTab === 'info' ? 'text-blue-600' : 'text-slate-400'
+          }`}
+        >
+          Access Info
+          {activeTab === 'info' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
+        </button>
+        <button 
+          onClick={() => setActiveTab('messenger')}
+          className={`pb-4 px-2 text-sm font-bold transition-all relative flex items-center gap-2 shrink-0 ${
+            activeTab === 'messenger' ? 'text-blue-600' : 'text-slate-400'
+          }`}
+        >
+          Private Chat
+          {unreadTotal > 0 && (
+            <span className="bg-red-500 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full animate-bounce">
+              {unreadTotal}
+            </span>
+          )}
+          {activeTab === 'messenger' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
+        </button>
+      </div>
+
+      {activeTab === 'messenger' ? (
+        <PrivateMessaging />
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2 space-y-6">
           <section className="space-y-4">
             <h3 className="font-bold text-slate-900 dark:text-white flex items-center gap-2">
@@ -256,6 +318,7 @@ export const AuthorizedPersonDashboard: React.FC = () => {
           </div>
         </div>
       </div>
-    </div>
-  );
+    )}
+  </div>
+);
 };

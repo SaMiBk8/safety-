@@ -37,53 +37,43 @@ async function startServer() {
     }
 
     if (!appCertificate) {
-      console.log('Agora App Certificate missing, returning null token');
+      console.log('Agora App Certificate missing, returning null token (App Certificate might be disabled in Agora Console)');
       return res.json({ token: null });
     }
 
-    console.log(`Agora Credentials Check: AppID length=${appId.length}, Cert length=${appCertificate.length}`);
-
-    const uid = 0;
-    const role = RtcRole.PUBLISHER;
-    const expirationTimeInSeconds = 3600 * 24; // 24 hours for maximum stability
+    // Use a standard 1-hour expiration but with a generous buffer
+    const expirationTimeInSeconds = 3600; 
     const currentTimestamp = Math.floor(Date.now() / 1000);
-    const privilegeExpiredTs = currentTimestamp + expirationTimeInSeconds;
+    // Add a 24-hour buffer to privilegeExpiredTs to handle clock skew and long sessions
+    const privilegeExpiredTs = currentTimestamp + expirationTimeInSeconds + 86400; 
     
+    console.log(`Generating token: Channel=${channelName}, AppID=${appId.substring(0, 5)}..., Time=${currentTimestamp}, Expiry=${privilegeExpiredTs}`);
+
     try {
       let token;
-      console.log(`Generating Agora Token:
-        Channel: ${channelName}
-        AppID: ${appId.substring(0, 5)}...
-        Cert: ${appCertificate.substring(0, 5)}...
-        UID: ${uid}
-        Role: ${role}
-        Current Time: ${currentTimestamp}
-        Expire Time: ${privilegeExpiredTs}
-      `);
       
+      // Use the most stable method for the installed version of agora-token (v2.x)
       try {
-        // Try 7-argument version (newer SDKs)
+        // In v2.x, buildTokenWithUid takes absolute timestamps.
         token = RtcTokenBuilder.buildTokenWithUid(
           appId,
           appCertificate,
           channelName,
-          uid,
-          role,
-          privilegeExpiredTs,
-          privilegeExpiredTs
+          0, // uid = 0 means any UID
+          RtcRole.PUBLISHER,
+          privilegeExpiredTs, // token expiration
+          privilegeExpiredTs  // privilege expiration
         );
-        console.log('Token generated using 7-argument method');
       } catch (e) {
-        console.warn('7-argument method failed, falling back to 6-argument method');
+        console.warn('Primary token generation failed, trying fallback:', e);
         token = (RtcTokenBuilder as any).buildTokenWithUid(
           appId,
           appCertificate,
           channelName,
-          uid,
-          role,
+          0,
+          RtcRole.PUBLISHER,
           privilegeExpiredTs
         );
-        console.log('Token generated using 6-argument method');
       }
 
       if (!token) {

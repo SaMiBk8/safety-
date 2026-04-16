@@ -12,6 +12,14 @@
   padding-top: env(safe-area-inset-top);
 }
 
+@utility scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
 @layer base {
   html {
     @apply antialiased scroll-smooth;
@@ -23,6 +31,23 @@
     @apply transition-colors duration-300;
     @apply overflow-x-hidden min-h-screen;
     -webkit-tap-highlight-color: transparent;
-    user-select: none;
+  }
+
+  /* Custom Scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-slate-200 dark:bg-slate-800 rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-slate-300 dark:bg-slate-700;
   }
 }

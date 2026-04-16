@@ -1,19 +1,39 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { db, storage } from '../../lib/firebase';
-import { doc, updateDoc, addDoc, collection, serverTimestamp, query, where, getDocs } from 'firebase/firestore';
+import { doc, updateDoc, addDoc, collection, serverTimestamp, query, where, getDocs, onSnapshot } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, uploadBytesResumable } from 'firebase/storage';
 import { motion, AnimatePresence } from 'motion/react';
-import { Shield, Users, GraduationCap, MessageSquare, Send, FileText, Info, CheckCircle2, Clock } from 'lucide-react';
+import { Shield, Users, GraduationCap, MessageSquare, Send, FileText, Info, CheckCircle2, Clock, BookOpen, Activity, UserCheck } from 'lucide-react';
 import { UserRole, School } from '../../types';
 import { handleFirestoreError, OperationType } from '../../lib/firestore-errors';
 
 import { Chat } from '../Chat';
+import { PrivateMessaging } from '../PrivateMessaging';
 
 export const VisitorDashboard: React.FC = () => {
   const { user, profile, refreshProfile } = useAuth();
+  const [activeTab, setActiveTab] = useState<'request' | 'messenger'>('request');
+  const [unreadTotal, setUnreadTotal] = useState(0);
+
+  useEffect(() => {
+    if (!user?.uid) return;
+    const q = query(
+      collection(db, 'messages'),
+      where('receiverId', '==', user.uid),
+      where('isRead', '==', false)
+    );
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setUnreadTotal(snapshot.size);
+    });
+    return () => unsubscribe();
+  }, [user?.uid]);
   const [requestedRole, setRequestedRole] = useState<UserRole | ''>('');
+  const [roleCategory, setRoleCategory] = useState<'family' | 'professional'>('family');
+  const [teacherType, setTeacherType] = useState<'standard' | 'quran' | 'sports'>('standard');
+  const [subject, setSubject] = useState('');
   const [message, setMessage] = useState('');
+  const [error, setError] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -51,36 +71,88 @@ export const VisitorDashboard: React.FC = () => {
   const handleSubmitRequest = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user?.uid || !requestedRole) return;
+    if (requestedRole === 'teacher' && teacherType === 'standard' && !subject.trim()) {
+      setError('Please specify your subject');
+      return;
+    }
 
+    if (selectedFile && selectedFile.size > 5 * 1024 * 1024) {
+      setError('File is too large. Maximum size is 5MB.');
+      return;
+    }
+
+    setError(null);
     setIsSubmitting(true);
     setUploadProgress(0);
     try {
       let fileUrl = null;
       if (selectedFile) {
-        const storageRef = ref(storage, `verification/${user.uid}/${Date.now()}_${selectedFile.name}`);
-        
-        await new Promise((resolve, reject) => {
-          const uploadTask = uploadBytesResumable(storageRef, selectedFile);
+        // Optimization: For small files (< 400KB), use data URL to bypass Storage stall risks
+        if (selectedFile.size < 400 * 1024) {
+          fileUrl = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.onerror = reject;
+            reader.readAsDataURL(selectedFile);
+          });
+        } else {
+          const storageRef = ref(storage, `verification/${user.uid}/${Date.now()}_${selectedFile.name}`);
           
-          uploadTask.on('state_changed', 
-            (snapshot) => {
-              const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-              setUploadProgress(progress);
-            }, 
-            (error) => reject(error), 
-            async () => {
-              fileUrl = await getDownloadURL(uploadTask.snapshot.ref);
-              resolve(fileUrl);
-            }
-          );
-        });
+          fileUrl = await new Promise<string>((resolve, reject) => {
+            const uploadTask = uploadBytesResumable(storageRef, selectedFile);
+            
+            let lastBytesTransferred = 0;
+            let stallTimeout = setTimeout(() => {
+              uploadTask.cancel();
+              reject(new Error('Upload stalled. Please check your connection or try a smaller file.'));
+            }, 120000); // 2 minute stall timeout
+
+            uploadTask.on('state_changed', 
+              (snapshot) => {
+                const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+                setUploadProgress(progress);
+                
+                if (snapshot.bytesTransferred > lastBytesTransferred) {
+                  lastBytesTransferred = snapshot.bytesTransferred;
+                  clearTimeout(stallTimeout);
+                  stallTimeout = setTimeout(() => {
+                    uploadTask.cancel();
+                    reject(new Error('Upload stalled. Please check your connection.'));
+                  }, 120000);
+                }
+              }, 
+              (error: any) => {
+                clearTimeout(stallTimeout);
+                if (error.code === 'storage/retry-limit-exceeded') {
+                  reject(new Error('The upload connection was lost multiple times. Please check your internet and try again.'));
+                } else {
+                  reject(error);
+                }
+              }, 
+              async () => {
+                clearTimeout(stallTimeout);
+                try {
+                  const url = await getDownloadURL(uploadTask.snapshot.ref);
+                  resolve(url);
+                } catch (err) {
+                  reject(err);
+                }
+              }
+            );
+          });
+        }
       }
 
       // Update profile with requested role
       await updateDoc(doc(db, 'users', user.uid), {
-        requestedRole,
+        requestedRole: requestedRole === 'teacher' 
+          ? (teacherType === 'quran' ? 'quran_teacher' : teacherType === 'sports' ? 'sports_coach' : 'teacher')
+          : requestedRole,
+        subject: requestedRole === 'teacher' && teacherType === 'standard' ? subject : null,
         schoolId: selectedSchoolId || null,
         requestMessage: message,
+        fileName: selectedFile?.name || null,
+        fileUrl,
         updatedAt: serverTimestamp()
       });
 
@@ -89,7 +161,10 @@ export const VisitorDashboard: React.FC = () => {
         uid: user.uid,
         email: user.email,
         displayName: user.displayName,
-        requestedRole,
+        requestedRole: requestedRole === 'teacher' 
+          ? (teacherType === 'quran' ? 'quran_teacher' : teacherType === 'sports' ? 'sports_coach' : 'teacher')
+          : requestedRole,
+        subject: requestedRole === 'teacher' && teacherType === 'standard' ? subject : null,
         schoolId: selectedSchoolId || null,
         message,
         fileName: selectedFile?.name || null,
@@ -100,7 +175,21 @@ export const VisitorDashboard: React.FC = () => {
 
       setSubmitted(true);
       alert('Request sent successfully!');
-    } catch (error) {
+    } catch (error: any) {
+      console.error('Submission Error:', error);
+      let errorMessage = 'Failed to submit request. Please try again.';
+      
+      if (error.message?.includes('Upload timed out')) {
+        errorMessage = error.message;
+      } else if (error.code === 'storage/retry-limit-exceeded') {
+        errorMessage = 'The upload connection was lost. Please check your internet and try again.';
+      } else if (error.code === 'storage/unauthorized') {
+        errorMessage = 'You do not have permission to upload files.';
+      } else if (error.code === 'storage/canceled') {
+        errorMessage = 'Upload was canceled.';
+      }
+
+      setError(errorMessage);
       handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`, user);
     } finally {
       setIsSubmitting(false);
@@ -110,7 +199,47 @@ export const VisitorDashboard: React.FC = () => {
 
   return (
     <div className="max-w-4xl mx-auto space-y-8 pb-20">
-      {/* Pending Setup Notification */}
+      <header className="flex items-center justify-between">
+        <div>
+          <h2 className="text-3xl font-black text-slate-900 dark:text-white tracking-tight">Visitor Portal</h2>
+          <p className="text-slate-500 dark:text-slate-400 font-medium">Welcome to our school community</p>
+        </div>
+        <div className="bg-blue-100 dark:bg-blue-900/30 p-3 rounded-2xl shadow-inner">
+          <Shield className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+        </div>
+      </header>
+
+      <div className="flex gap-4 border-b border-slate-100 dark:border-slate-800 overflow-x-auto whitespace-nowrap pb-px scrollbar-hide">
+        <button 
+          onClick={() => setActiveTab('request')}
+          className={`pb-4 px-2 text-sm font-bold transition-all relative shrink-0 ${
+            activeTab === 'request' ? 'text-blue-600' : 'text-slate-400'
+          }`}
+        >
+          Role Request
+          {activeTab === 'request' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
+        </button>
+        <button 
+          onClick={() => setActiveTab('messenger')}
+          className={`pb-4 px-2 text-sm font-bold transition-all relative flex items-center gap-2 shrink-0 ${
+            activeTab === 'messenger' ? 'text-blue-600' : 'text-slate-400'
+          }`}
+        >
+          Private Chat
+          {unreadTotal > 0 && (
+            <span className="bg-red-500 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full animate-bounce">
+              {unreadTotal}
+            </span>
+          )}
+          {activeTab === 'messenger' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
+        </button>
+      </div>
+
+      {activeTab === 'messenger' ? (
+        <PrivateMessaging />
+      ) : (
+        <>
+          {/* Pending Setup Notification */}
       <motion.div 
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -186,30 +315,180 @@ export const VisitorDashboard: React.FC = () => {
                 <h3 className="text-xl font-black text-slate-900 dark:text-white">Request Access</h3>
                 <p className="text-sm text-slate-500">Choose your role and tell us a bit about yourself.</p>
                 
-                <div className="space-y-3">
-                  <label className="block text-sm font-bold text-slate-700 dark:text-slate-300">I am a...</label>
-                  <div className="grid grid-cols-3 gap-3">
-                    {[
-                      { id: 'teacher', label: 'Teacher', icon: GraduationCap },
-                      { id: 'parent', label: 'Parent', icon: Users },
-                      { id: 'child', label: 'Student', icon: GraduationCap },
-                    ].map((role) => (
-                      <button
-                        key={role.id}
-                        type="button"
-                        onClick={() => setRequestedRole(role.id as UserRole)}
-                        className={`p-4 rounded-2xl border transition-all flex flex-col items-center gap-2 ${
-                          requestedRole === role.id 
-                            ? 'bg-blue-600 border-blue-600 text-white shadow-lg shadow-blue-200 dark:shadow-none' 
-                            : 'bg-slate-50 dark:bg-slate-800 border-slate-100 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:border-blue-300'
-                        }`}
-                      >
-                        <role.icon className="w-6 h-6" />
-                        <span className="text-[10px] font-bold uppercase">{role.label}</span>
-                      </button>
-                    ))}
+                <div className="space-y-6">
+                  <div className="flex p-1 bg-slate-100 dark:bg-slate-800 rounded-2xl">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRoleCategory('family');
+                        setRequestedRole('');
+                      }}
+                      className={`flex-1 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${
+                        roleCategory === 'family' 
+                          ? 'bg-white dark:bg-slate-700 text-blue-600 shadow-sm' 
+                          : 'text-slate-400 hover:text-slate-600'
+                      }`}
+                    >
+                      Family & Student
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRoleCategory('professional');
+                        setRequestedRole('');
+                      }}
+                      className={`flex-1 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${
+                        roleCategory === 'professional' 
+                          ? 'bg-white dark:bg-slate-700 text-blue-600 shadow-sm' 
+                          : 'text-slate-400 hover:text-slate-600'
+                      }`}
+                    >
+                      Staff & Admin
+                    </button>
+                  </div>
+
+                  <div className="space-y-4">
+                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                      {roleCategory === 'family' ? 'Select Family Role' : 'Select Professional Role'}
+                    </label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {roleCategory === 'family' ? (
+                        <>
+                          {[
+                            { id: 'parent', label: 'Parent', icon: Users, desc: 'Monitor your children' },
+                            { id: 'child', label: 'Student', icon: GraduationCap, desc: 'Access your classes' },
+                          ].map((role) => (
+                            <button
+                              key={role.id}
+                              type="button"
+                              onClick={() => {
+                                setRequestedRole(role.id as UserRole);
+                                setError(null);
+                              }}
+                              className={`p-6 rounded-[2rem] border-2 transition-all flex flex-col items-center text-center gap-3 group relative overflow-hidden ${
+                                requestedRole === role.id 
+                                  ? 'bg-blue-600 border-blue-600 text-white shadow-xl shadow-blue-200 dark:shadow-none' 
+                                  : 'bg-white dark:bg-slate-800 border-slate-100 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:border-blue-200 dark:hover:border-blue-900'
+                              }`}
+                            >
+                              <div className={`p-3 rounded-2xl transition-colors ${
+                                requestedRole === role.id ? 'bg-white/20' : 'bg-slate-50 dark:bg-slate-900 group-hover:bg-blue-50 dark:group-hover:bg-blue-900/30'
+                              }`}>
+                                <role.icon className={`w-6 h-6 ${requestedRole === role.id ? 'text-white' : 'text-blue-600'}`} />
+                              </div>
+                              <div>
+                                <span className="block text-xs font-black uppercase tracking-wider">{role.label}</span>
+                                <span className={`text-[10px] mt-1 block opacity-60 font-medium ${requestedRole === role.id ? 'text-white' : 'text-slate-500'}`}>
+                                  {role.desc}
+                                </span>
+                              </div>
+                            </button>
+                          ))}
+                        </>
+                      ) : (
+                        <>
+                          {[
+                            { id: 'teacher', label: 'Teacher', icon: GraduationCap, desc: 'Quran, Sports, or Academic' },
+                            { id: 'authorized_person', label: 'Authorized', icon: UserCheck, desc: 'Pickup authorization' },
+                            { id: 'system_admin', label: 'Admin', icon: Shield, desc: 'System management' },
+                          ].map((role) => (
+                            <button
+                              key={role.id}
+                              type="button"
+                              onClick={() => {
+                                setRequestedRole(role.id as UserRole);
+                                setError(null);
+                              }}
+                              className={`p-6 rounded-[2rem] border-2 transition-all flex flex-col items-center text-center gap-3 group relative overflow-hidden ${
+                                requestedRole === role.id 
+                                  ? 'bg-blue-600 border-blue-600 text-white shadow-xl shadow-blue-200 dark:shadow-none' 
+                                  : 'bg-white dark:bg-slate-800 border-slate-100 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:border-blue-200 dark:hover:border-blue-900'
+                              }`}
+                            >
+                              <div className={`p-3 rounded-2xl transition-colors ${
+                                requestedRole === role.id ? 'bg-white/20' : 'bg-slate-50 dark:bg-slate-900 group-hover:bg-blue-50 dark:group-hover:bg-blue-900/30'
+                              }`}>
+                                <role.icon className={`w-6 h-6 ${requestedRole === role.id ? 'text-white' : 'text-blue-600'}`} />
+                              </div>
+                              <div>
+                                <span className="block text-xs font-black uppercase tracking-wider">{role.label}</span>
+                                <span className={`text-[10px] mt-1 block opacity-60 font-medium ${requestedRole === role.id ? 'text-white' : 'text-slate-500'}`}>
+                                  {role.desc}
+                                </span>
+                              </div>
+                            </button>
+                          ))}
+                        </>
+                      )}
+                    </div>
                   </div>
                 </div>
+
+                <AnimatePresence mode="wait">
+                  {requestedRole === 'teacher' && (
+                    <motion.div 
+                      key="teacher-options"
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -10 }}
+                      className="p-6 bg-slate-50 dark:bg-slate-950 rounded-[2rem] border border-slate-100 dark:border-slate-800 space-y-6"
+                    >
+                      <div className="space-y-4">
+                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Specialization</label>
+                        <div className="grid grid-cols-3 gap-3">
+                          {[
+                            { id: 'standard', label: 'Subject', icon: FileText, color: 'blue' },
+                            { id: 'quran', label: 'Quran', icon: BookOpen, color: 'emerald' },
+                            { id: 'sports', label: 'Sports', icon: Activity, color: 'orange' },
+                          ].map((type) => (
+                            <button
+                              key={type.id}
+                              type="button"
+                              onClick={() => {
+                                setTeacherType(type.id as any);
+                                setError(null);
+                              }}
+                              className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 ${
+                                teacherType === type.id 
+                                  ? `bg-white dark:bg-slate-900 border-blue-500 text-blue-600 shadow-lg` 
+                                  : 'bg-white dark:bg-slate-900 border-transparent text-slate-500 dark:text-slate-400 hover:border-slate-200 dark:hover:border-slate-700'
+                              }`}
+                            >
+                              <type.icon className="w-5 h-5" />
+                              <span className="text-[10px] font-black uppercase tracking-tight">{type.label}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {teacherType === 'standard' && (
+                        <motion.div 
+                          initial={{ opacity: 0, x: -10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          className="space-y-3"
+                        >
+                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Which Subject do you teach?</label>
+                          <div className="relative">
+                            <input 
+                              type="text"
+                              value={subject}
+                              onChange={(e) => {
+                                setSubject(e.target.value);
+                                if (error) setError(null);
+                              }}
+                              placeholder="e.g. Mathematics, English, History..."
+                              className={`w-full px-6 py-4 bg-white dark:bg-slate-900 border-2 rounded-2xl outline-none transition-all font-bold text-slate-900 dark:text-white ${
+                                error ? 'border-red-500 focus:border-red-500' : 'border-transparent focus:border-blue-500'
+                              }`}
+                            />
+                            <FileText className="absolute right-6 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-300" />
+                          </div>
+                          {error && <p className="text-[10px] font-bold text-red-500 uppercase tracking-wider ml-2">{error}</p>}
+                        </motion.div>
+                      )}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
 
                 <div className="space-y-3">
                   <label className="block text-sm font-bold text-slate-700 dark:text-slate-300">Select School (Optional)</label>
@@ -335,6 +614,8 @@ export const VisitorDashboard: React.FC = () => {
           )}
         </div>
       </section>
+        </>
+      )}
     </div>
   );
 };
