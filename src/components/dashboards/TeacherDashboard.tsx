@@ -45,6 +45,8 @@ export const TeacherDashboard: React.FC = () => {
   const [newAssignDesc, setNewAssignDesc] = useState('');
   const [newAssignDueDate, setNewAssignDueDate] = useState('');
   const [newAssignDeadline, setNewAssignDeadline] = useState('');
+  const [assignFile, setAssignFile] = useState<File | null>(null);
+  const [isAssignUploading, setIsAssignUploading] = useState(false);
   const [newAnnDeadline, setNewAnnDeadline] = useState('');
 
   useEffect(() => {
@@ -301,7 +303,36 @@ export const TeacherDashboard: React.FC = () => {
     e.preventDefault();
     if (!profile?.schoolId || !profile?.uid) return;
 
+    setIsAssignUploading(true);
     try {
+      let fileUrl = '';
+      let fileName = '';
+
+      if (assignFile) {
+        const storageRef = ref(storage, `assignments/${profile.schoolId}/${Date.now()}_${assignFile.name}`);
+        const uploadTask = uploadBytesResumable(storageRef, assignFile);
+        
+        fileUrl = await new Promise((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            uploadTask.cancel();
+            reject(new Error("Upload timed out after 10 minutes."));
+          }, 600000);
+
+          uploadTask.on('state_changed', null, 
+            (error: any) => {
+              clearTimeout(timeout);
+              reject(error);
+            }, 
+            async () => {
+              clearTimeout(timeout);
+              const url = await getDownloadURL(uploadTask.snapshot.ref);
+              resolve(url);
+            }
+          );
+        });
+        fileName = assignFile.name;
+      }
+
       await addDoc(collection(db, 'assignments'), {
         schoolId: profile.schoolId,
         teacherId: profile.uid,
@@ -311,16 +342,21 @@ export const TeacherDashboard: React.FC = () => {
         description: newAssignDesc,
         dueDate: newAssignDueDate ? new Date(newAssignDueDate) : null,
         deadline: newAssignDeadline ? new Date(newAssignDeadline) : null,
+        fileName,
+        fileUrl,
         createdAt: serverTimestamp()
       });
       setNewAssignTitle('');
       setNewAssignDesc('');
       setNewAssignDueDate('');
       setNewAssignDeadline('');
+      setAssignFile(null);
       setIsAddingAssignment(false);
       alert('Assignment created successfully!');
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'assignments', user || undefined);
+    } finally {
+      setIsAssignUploading(false);
     }
   };
 
@@ -707,73 +743,11 @@ export const TeacherDashboard: React.FC = () => {
               <Megaphone className="w-6 h-6 text-blue-600" />
               School Announcements
             </div>
-            <button 
-              onClick={() => setIsAddingAnnouncement(!isAddingAnnouncement)}
-              className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold flex items-center gap-2 shadow-lg shadow-blue-100"
-            >
-              {isAddingAnnouncement ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-              {isAddingAnnouncement ? 'Close Form' : 'Post Announcement'}
-            </button>
           </div>
-
-          <AnimatePresence>
-            {isAddingAnnouncement && (
-              <motion.form 
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                exit={{ opacity: 0, height: 0 }}
-                onSubmit={handleAddAnnouncement}
-                className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-blue-100 dark:border-slate-800 shadow-lg space-y-4 overflow-hidden"
-              >
-                <input 
-                  type="text" 
-                  placeholder="Announcement Title" 
-                  className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white font-bold"
-                  value={newAnnTitle}
-                  onChange={(e) => setNewAnnTitle(e.target.value)}
-                  required
-                />
-                <textarea 
-                  placeholder="What would you like to announce?" 
-                  className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 min-h-[120px] dark:text-white"
-                  value={newAnnContent}
-                  onChange={(e) => setNewAnnContent(e.target.value)}
-                  required
-                />
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <label className="text-xs font-bold text-slate-500 uppercase px-1">Attach File (Optional)</label>
-                    <input 
-                      type="file" 
-                      onChange={(e) => setAnnFile(e.target.files?.[0] || null)}
-                      className="w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-bold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-xs font-bold text-slate-500 uppercase px-1">Auto-Delete Deadline</label>
-                    <input 
-                      type="datetime-local" 
-                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
-                      value={newAnnDeadline}
-                      onChange={(e) => setNewAnnDeadline(e.target.value)}
-                    />
-                  </div>
-                </div>
-                <div className="flex justify-end gap-3 pt-2">
-                  <button 
-                    type="submit"
-                    className="px-8 py-3 bg-blue-600 text-white rounded-xl font-bold shadow-lg shadow-blue-200"
-                  >
-                    Post to School Board
-                  </button>
-                </div>
-              </motion.form>
-            )}
-          </AnimatePresence>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {announcements.map((ann) => (
-              <div key={ann.id} className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm">
+              <div key={ann.id} className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm transition-all hover:shadow-md">
                 <h3 className="font-bold text-slate-900 dark:text-white mb-2">{ann.title}</h3>
                 <p className="text-slate-600 dark:text-slate-400 text-sm leading-relaxed mb-4">{ann.content}</p>
                 {ann.fileUrl && (
@@ -782,7 +756,7 @@ export const TeacherDashboard: React.FC = () => {
                       href={ann.fileUrl} 
                       target="_blank" 
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-2 p-2 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded-xl text-xs font-bold hover:underline"
+                      className="inline-flex items-center gap-2.5 px-4 py-2 bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 rounded-xl text-xs font-black uppercase tracking-tight hover:bg-blue-100 transition-all border border-blue-100 dark:border-blue-800"
                     >
                       <FileText className="w-4 h-4" />
                       {ann.fileName || 'View Attachment'}
@@ -796,7 +770,9 @@ export const TeacherDashboard: React.FC = () => {
               </div>
             ))}
             {announcements.length === 0 && (
-              <div className="col-span-full text-center py-20 text-slate-400 italic">No announcements from school administration.</div>
+              <div className="col-span-full text-center py-20 text-slate-400 italic bg-white dark:bg-slate-900 rounded-[3rem] border border-slate-100 dark:border-slate-800">
+                No announcements from school administration.
+              </div>
             )}
           </div>
         </div>
@@ -847,6 +823,14 @@ export const TeacherDashboard: React.FC = () => {
                     onChange={(e) => setNewAssignDeadline(e.target.value)}
                   />
                 </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-slate-400 uppercase px-1">Attach Material (Zip/Doc/Img)</label>
+                  <input 
+                    type="file" 
+                    onChange={(e) => setAssignFile(e.target.files?.[0] || null)}
+                    className="w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-bold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                  />
+                </div>
               </div>
               <textarea 
                 placeholder="Describe the task for your students..." 
@@ -865,9 +849,10 @@ export const TeacherDashboard: React.FC = () => {
                 </button>
                 <button 
                   type="submit"
-                  className="px-6 py-2 bg-blue-600 text-white rounded-xl font-semibold"
+                  disabled={isAssignUploading}
+                  className="px-8 py-3 bg-blue-600 text-white rounded-xl font-bold shadow-lg shadow-blue-200 disabled:opacity-50"
                 >
-                  Create Assignment
+                  {isAssignUploading ? 'Uploading...' : 'Create Assignment'}
                 </button>
               </div>
             </motion.form>

@@ -44,6 +44,8 @@ interface Announcement {
   schoolId: string;
 }
 
+import { handleFirestoreError, OperationType } from '../../lib/firestore-errors';
+
 export const ChildDashboard: React.FC<{ onStartCall?: (channel: string, receiverId: string, receiverName: string) => void }> = ({ onStartCall }) => {
   const { profile, user } = useAuth();
   const [studentData, setStudentData] = useState<Student | null>(null);
@@ -196,8 +198,16 @@ export const ChildDashboard: React.FC<{ onStartCall?: (channel: string, receiver
 
   const handleHomeworkSubmit = async () => {
     if (isSubmitting) return;
-    if (!homeworkTitle || (!selectedTeacherId && !homeworkExternalLink)) {
-      toast.error("Please fill in the title and select a teacher / provide a link.");
+    if (!studentData) {
+      toast.error("Student profile not loaded yet. Please wait a moment.");
+      return;
+    }
+    if (!homeworkTitle) {
+      toast.error("Please provide a title for your homework.");
+      return;
+    }
+    if (!selectedTeacherId && !homeworkExternalLink) {
+      toast.error("Please select a teacher or provide an external link.");
       return;
     }
 
@@ -249,10 +259,13 @@ export const ChildDashboard: React.FC<{ onStartCall?: (channel: string, receiver
       setHomeworkDescription('');
       setHomeworkExternalLink('');
       setSelectedFile(null);
+      setUploadProgress(null);
       setActiveModal(null);
-      toast.success("Homework submitted!", { id: submissionToast });
+      toast.success("Homework submitted successfully!", { id: submissionToast });
     } catch (error: any) {
-      toast.error(error.message, { id: submissionToast });
+      console.error("Submission error:", error);
+      toast.error(error.message || "Failed to submit homework.", { id: submissionToast });
+      handleFirestoreError(error, OperationType.CREATE, 'homework_submissions', user || undefined);
     } finally {
       setIsSubmitting(false);
       setUploadProgress(null);
@@ -358,6 +371,20 @@ export const ChildDashboard: React.FC<{ onStartCall?: (channel: string, receiver
                       <div>
                         <div className="font-black text-lg">{a.title}</div>
                         <p className="text-sm text-slate-400 mt-2 line-clamp-2">{a.description}</p>
+                        {a.fileUrl && (
+                          <div className="mt-4">
+                            <a 
+                              href={a.fileUrl} 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-2 px-3 py-1.5 bg-blue-600/20 text-blue-400 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-600/40 transition-all border border-blue-600/30"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <FileText className="w-3.5 h-3.5" />
+                              View Material
+                            </a>
+                          </div>
+                        )}
                       </div>
                       <button 
                         onClick={() => {
@@ -409,37 +436,20 @@ export const ChildDashboard: React.FC<{ onStartCall?: (channel: string, receiver
             </div>
           </div>
 
-          {/* Contact Teachers */}
+          {/* Quick Actions / Contact Parent */}
           <div className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 shadow-xl space-y-6">
             <div className="flex items-center justify-between">
               <h3 className="text-xl font-black flex items-center gap-3 text-slate-900 dark:text-white">
-                <MessageSquare className="text-indigo-500" /> Contact Your Teachers
+                <MessageSquare className="text-indigo-500" /> Contact Parent
               </h3>
+              <button 
+                onClick={() => setActiveTab('messages')}
+                className="text-xs font-black uppercase text-blue-600 hover:underline"
+              >
+                Go to Messenger
+              </button>
             </div>
-            <div className="flex gap-6 overflow-x-auto pb-6 scrollbar-hide px-2">
-              {schoolTeachers.map(teacher => (
-                <button
-                  key={teacher.uid}
-                  onClick={() => {
-                    setSelectedTeacher({ uid: teacher.uid, displayName: teacher.displayName || teacher.email || 'Teacher' });
-                  }}
-                  className="flex flex-col items-center gap-2 shrink-0 group"
-                >
-                  <div className="relative">
-                    <div className="w-16 h-16 bg-indigo-50 dark:bg-indigo-900/30 rounded-3xl flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-black text-xl group-hover:scale-110 transition-all border-2 border-transparent group-hover:border-indigo-200 shadow-sm">
-                      {teacher.displayName?.[0] || 'T'}
-                    </div>
-                    <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-emerald-500 border-2 border-white dark:border-slate-900 rounded-full shadow-sm" />
-                  </div>
-                  <span className="text-[10px] font-black text-slate-600 dark:text-slate-400 text-center max-w-[80px] truncate uppercase tracking-tighter">
-                    {teacher.displayName || 'Teacher'}
-                  </span>
-                </button>
-              ))}
-              {schoolTeachers.length === 0 && (
-                <p className="text-xs text-slate-400 italic py-4">No teachers found in your school.</p>
-              )}
-            </div>
+            <p className="text-sm text-slate-500">Need help? Send a secure message directly to your parent.</p>
           </div>
 
           <section className="bg-emerald-600 p-8 rounded-[3rem] text-white shadow-2xl relative overflow-hidden group">
@@ -487,41 +497,6 @@ export const ChildDashboard: React.FC<{ onStartCall?: (channel: string, receiver
       )}
 
       <AnimatePresence>
-        {selectedTeacher && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setSelectedTeacher(null)}
-              className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm"
-            />
-            <motion.div 
-              initial={{ scale: 0.9, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              className="relative bg-white dark:bg-slate-900 w-full max-w-md rounded-[2.5rem] shadow-2xl overflow-hidden"
-            >
-              <div className="p-8">
-                <div className="flex items-center justify-between mb-6">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-indigo-100 dark:bg-indigo-900/30 rounded-2xl flex items-center justify-center text-indigo-600">
-                      <MessageSquare className="w-6 h-6" />
-                    </div>
-                    <h3 className="text-xl font-black text-slate-900 dark:text-white">Chat with {selectedTeacher.displayName}</h3>
-                  </div>
-                  <button onClick={() => setSelectedTeacher(null)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors">
-                    <X className="w-6 h-6 text-slate-400" />
-                  </button>
-                </div>
-                <div className="h-[400px] bg-slate-50 dark:bg-slate-800 rounded-3xl overflow-hidden shadow-inner border border-slate-100 dark:border-slate-800">
-                  <Chat receiverId={selectedTeacher.uid} receiverName={selectedTeacher.displayName} />
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
-
         {activeModal === 'detail' && selectedDetail && (
           <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={() => setActiveModal(null)} />
@@ -568,6 +543,20 @@ export const ChildDashboard: React.FC<{ onStartCall?: (channel: string, receiver
                         {selectedDetail.description || 'No additional instructions provided.'}
                       </div>
                     </div>
+                    {selectedDetail.fileUrl && (
+                      <div>
+                        <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Assignment Material</h4>
+                        <a 
+                          href={selectedDetail.fileUrl} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="w-full flex items-center justify-center gap-2 py-4 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded-2xl font-black text-sm uppercase tracking-widest border border-blue-100 dark:border-blue-800 hover:bg-blue-100 transition-all"
+                        >
+                          <FileText className="w-5 h-5" />
+                          Download / View Material
+                        </a>
+                      </div>
+                    )}
                   </>
                 )}
 

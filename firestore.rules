@@ -165,7 +165,7 @@ service cloud.firestore {
     // Domain Validators
     // ===============================================================
     function isValidUser(data) {
-      return hasOnlyAllowedFields(['uid', 'email', 'displayName', 'photoURL', 'photoUrl', 'role', 'status', 'requestedRole', 'requestMessage', 'updatedAt', 'isDarkMode', 'createdAt', 'schoolId', 'parentId', 'childIds', 'authorizedBy', 'location', 'subject']) &&
+      return hasOnlyAllowedFields(['uid', 'email', 'displayName', 'photoURL', 'photoUrl', 'role', 'status', 'requestedRole', 'requestMessage', 'updatedAt', 'isDarkMode', 'createdAt', 'schoolId', 'parentId', 'childIds', 'authorizedBy', 'location', 'subject', 'fileName', 'fileUrl']) &&
              (data.uid is string) && 
              (data.email is string) &&
              (!('role' in data) || data.role in ['system_admin', 'school_admin', 'teacher', 'quran_teacher', 'sports_coach', 'parent', 'child', 'authorized_person', 'visitor']) &&
@@ -183,6 +183,8 @@ service cloud.firestore {
              (!('authorizedBy' in data) || (data.authorizedBy is string || data.authorizedBy == null)) &&
              (!('location' in data) || (data.location is map && data.location.lat is number && data.location.lng is number)) &&
              (!('subject' in data) || (data.subject is string && data.subject.size() < 100)) &&
+             (!('fileName' in data) || (data.fileName is string || data.fileName == null)) &&
+             (!('fileUrl' in data) || (data.fileUrl is string || data.fileUrl == null)) &&
              (!('updatedAt' in data) || data.updatedAt is timestamp);
     }
 
@@ -211,7 +213,7 @@ service cloud.firestore {
     }
 
     function isValidAssignment(data) {
-      return hasOnlyAllowedFields(['schoolId', 'teacherId', 'teacherName', 'teacherRole', 'title', 'description', 'dueDate', 'createdAt', 'deadline']) &&
+      return hasOnlyAllowedFields(['schoolId', 'teacherId', 'teacherName', 'teacherRole', 'title', 'description', 'dueDate', 'createdAt', 'deadline', 'fileName', 'fileUrl']) &&
              data.schoolId is string &&
              data.teacherId is string &&
              data.teacherName is string &&
@@ -220,6 +222,8 @@ service cloud.firestore {
              data.description is string && data.description.size() > 0 && data.description.size() < 5000 &&
              (!('dueDate' in data) || (data.dueDate is timestamp || data.dueDate == null)) &&
              (!('deadline' in data) || (data.deadline is timestamp || data.deadline == null)) &&
+             (!('fileName' in data) || (data.fileName is string || data.fileName == null)) &&
+             (!('fileUrl' in data) || (data.fileUrl is string || data.fileUrl == null)) &&
              data.createdAt is timestamp;
     }
 
@@ -312,7 +316,7 @@ service cloud.firestore {
     }
 
     function isValidVisitorMessage(data) {
-      return hasOnlyAllowedFields(['uid', 'email', 'displayName', 'requestedRole', 'schoolId', 'message', 'createdAt', 'status', 'fileName', 'fileUrl']) &&
+      return hasOnlyAllowedFields(['uid', 'email', 'displayName', 'requestedRole', 'schoolId', 'message', 'createdAt', 'status', 'fileName', 'fileUrl', 'subject']) &&
              data.uid is string &&
              data.email is string &&
              (!('displayName' in data) || data.displayName is string) &&

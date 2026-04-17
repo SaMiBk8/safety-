@@ -85,7 +85,7 @@ export const ContactList: React.FC<ContactListProps> = ({ onSelect, selectedId }
             };
           });
 
-        if (profile.role === 'school_admin' || profile.role === 'system_admin') {
+        if ((profile.role === 'school_admin' || profile.role === 'system_admin') && profile.schoolId) {
           // Admins see everyone in the school
           const q = query(collection(db, 'users'), where('schoolId', '==', profile.schoolId));
           const snap = await getDocs(q);
@@ -99,7 +99,7 @@ export const ContactList: React.FC<ContactListProps> = ({ onSelect, selectedId }
               email: u.email
             }));
           contactList = allUsers;
-        } else if (profile.role === 'teacher' || profile.role === 'quran_teacher' || profile.role === 'sports_coach') {
+        } else if ((profile.role === 'teacher' || profile.role === 'quran_teacher' || profile.role === 'sports_coach') && profile.schoolId) {
           // Teachers see parents of their students and other staff
           const studentsQ = query(collection(db, 'students'), where('schoolId', '==', profile.schoolId));
           const studentsSnap = await getDocs(studentsQ);
@@ -170,17 +170,20 @@ export const ContactList: React.FC<ContactListProps> = ({ onSelect, selectedId }
               };
             });
 
-          const adminQ = query(collection(db, 'users'), where('schoolId', '==', profile.schoolId), where('role', '==', 'school_admin'));
-          const adminSnap = await getDocs(adminQ);
-          const adminList = adminSnap.docs.map(doc => {
-            const data = doc.data();
-            return {
-              uid: doc.id,
-              displayName: data.displayName || data.email,
-              role: 'school_admin',
-              email: data.email
-            };
-          });
+          let adminList: Contact[] = [];
+          if (profile.schoolId) {
+            const adminQ = query(collection(db, 'users'), where('schoolId', '==', profile.schoolId), where('role', '==', 'school_admin'));
+            const adminSnap = await getDocs(adminQ);
+            adminList = adminSnap.docs.map(doc => {
+              const data = doc.data();
+              return {
+                uid: doc.id,
+                displayName: data.displayName || data.email,
+                role: 'school_admin',
+                email: data.email
+              };
+            });
+          }
 
           const childrenList = studentData
             .filter(s => s.childUid)
@@ -228,7 +231,7 @@ export const ContactList: React.FC<ContactListProps> = ({ onSelect, selectedId }
                 }];
               }
             }
-            contactList = [...teacherList, ...parentList];
+            contactList = [...parentList];
           }
         }
 
