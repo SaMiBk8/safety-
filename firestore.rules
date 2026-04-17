@@ -211,7 +211,7 @@ service cloud.firestore {
     }
 
     function isValidAssignment(data) {
-      return hasOnlyAllowedFields(['schoolId', 'teacherId', 'teacherName', 'teacherRole', 'title', 'description', 'dueDate', 'createdAt']) &&
+      return hasOnlyAllowedFields(['schoolId', 'teacherId', 'teacherName', 'teacherRole', 'title', 'description', 'dueDate', 'createdAt', 'deadline']) &&
              data.schoolId is string &&
              data.teacherId is string &&
              data.teacherName is string &&
@@ -219,6 +219,7 @@ service cloud.firestore {
              data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
              data.description is string && data.description.size() > 0 && data.description.size() < 5000 &&
              (!('dueDate' in data) || (data.dueDate is timestamp || data.dueDate == null)) &&
+             (!('deadline' in data) || (data.deadline is timestamp || data.deadline == null)) &&
              data.createdAt is timestamp;
     }
 
@@ -246,12 +247,14 @@ service cloud.firestore {
     }
 
     function isValidAnnouncement(data) {
-      return hasOnlyAllowedFields(['schoolId', 'title', 'content', 'createdAt', 'authorId', 'fileName', 'fileUrl']) &&
+      return hasOnlyAllowedFields(['schoolId', 'title', 'content', 'createdAt', 'authorId', 'fileName', 'fileUrl', 'deadline']) &&
              data.schoolId is string &&
              data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
              data.content is string && data.content.size() > 0 && data.content.size() < 5000 &&
              (!('fileName' in data) || (data.fileName is string || data.fileName == null)) &&
              (!('fileUrl' in data) || (data.fileUrl is string || data.fileUrl == null)) &&
+             (!('authorId' in data) || (data.authorId is string || data.authorId == null)) &&
+             (!('deadline' in data) || (data.deadline is timestamp || data.deadline == null)) &&
              data.createdAt is timestamp;
     }
 
@@ -292,7 +295,7 @@ service cloud.firestore {
     }
 
     function isValidHomeworkSubmission(data) {
-      return hasOnlyAllowedFields(['studentId', 'studentName', 'schoolId', 'childUid', 'teacherId', 'teacherName', 'title', 'description', 'fileName', 'fileUrl', 'submittedAt', 'status']) &&
+      return hasOnlyAllowedFields(['studentId', 'studentName', 'schoolId', 'childUid', 'teacherId', 'teacherName', 'title', 'description', 'fileName', 'fileUrl', 'submittedAt', 'status', 'updatedAt']) &&
              data.studentId is string &&
              data.studentName is string &&
              data.schoolId is string &&
@@ -304,7 +307,8 @@ service cloud.firestore {
              (!('fileName' in data) || (data.fileName is string || data.fileName == null)) &&
              (!('fileUrl' in data) || (data.fileUrl is string || data.fileUrl == null)) &&
              data.submittedAt is timestamp &&
-             data.status in ['pending', 'reviewed', 'submitted'];
+             data.status in ['pending', 'reviewed', 'submitted'] &&
+             (!('updatedAt' in data) || data.updatedAt is timestamp);
     }
 
     function isValidVisitorMessage(data) {
@@ -533,7 +537,9 @@ service cloud.firestore {
                     isValidHomeworkSubmission(request.resource.data) && (
                       isAdmin() || 
                       request.auth.uid == resource.data.teacherId ||
-                      isSchoolAdmin(resource.data.schoolId)
+                      request.auth.uid == resource.data.childUid ||
+                      isSchoolAdmin(resource.data.schoolId) ||
+                      isTeacher(resource.data.schoolId)
                     );
       allow delete: if isAdmin() || isSchoolAdmin(resource.data.schoolId);
     }
@@ -605,6 +611,18 @@ service cloud.firestore {
              data.createdAt is timestamp;
     }
 
+    function isValidSchedule(data) {
+      return hasOnlyAllowedFields(['id', 'schoolId', 'day', 'startTime', 'endTime', 'subject', 'teacherName', 'grade', 'updatedAt']) &&
+             data.schoolId is string &&
+             data.day in ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'] &&
+             data.startTime is string &&
+             data.endTime is string &&
+             data.subject is string &&
+             (!('teacherName' in data) || data.teacherName is string) &&
+             (!('grade' in data) || data.grade is string) &&
+             (!('updatedAt' in data) || data.updatedAt is timestamp);
+    }
+
     match /feedbacks/{feedbackId} {
       allow read: if isAdmin();
       allow create: if isAuthenticated() && isValidFeedback(request.resource.data);
@@ -615,6 +633,13 @@ service cloud.firestore {
       allow create: if isAuthenticated() && isValidCall(request.resource.data) && request.resource.data.callerId == request.auth.uid;
       allow update: if isAuthenticated() && (request.auth.uid == resource.data.callerId || request.auth.uid == resource.data.receiverId || isAdmin()) && isValidCall(request.resource.data);
       allow delete: if isAdmin();
+    }
+
+    match /schedules/{scheduleId} {
+      allow read: if isAuthenticated();
+      allow create: if (isAdmin() || isSchoolAdmin(request.resource.data.schoolId)) && isValidSchedule(request.resource.data);
+      allow update: if (isAdmin() || isSchoolAdmin(resource.data.schoolId)) && isValidSchedule(request.resource.data);
+      allow delete: if (isAdmin() || isSchoolAdmin(resource.data.schoolId));
     }
 
     match /visitor_messages/{messageId} {

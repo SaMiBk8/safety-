@@ -62,7 +62,11 @@
         "schoolId": { "type": "string" },
         "title": { "type": "string" },
         "content": { "type": "string" },
-        "createdAt": { "type": "string", "format": "date-time" }
+        "fileName": { "type": "string" },
+        "fileUrl": { "type": "string" },
+        "authorId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "deadline": { "type": "string", "format": "date-time", "description": "Deadline after which the announcement is auto-deleted" }
       },
       "required": ["id", "schoolId", "title", "content"]
     },
@@ -139,7 +143,8 @@
         "title": { "type": "string" },
         "description": { "type": "string" },
         "dueDate": { "type": "string", "format": "date-time" },
-        "createdAt": { "type": "string", "format": "date-time" }
+        "createdAt": { "type": "string", "format": "date-time" },
+        "deadline": { "type": "string", "format": "date-time", "description": "Deadline after which the assignment is auto-deleted" }
       },
       "required": ["id", "schoolId", "teacherId", "title", "description", "createdAt"]
     },
@@ -226,6 +231,23 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "callerId", "receiverId", "channel", "status", "createdAt"]
+    },
+    "Schedule": {
+      "title": "Schedule",
+      "description": "Student school schedule/timetable",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "schoolId": { "type": "string" },
+        "day": { "type": "string", "enum": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"] },
+        "startTime": { "type": "string", "description": "HH:mm format" },
+        "endTime": { "type": "string", "description": "HH:mm format" },
+        "subject": { "type": "string" },
+        "teacherName": { "type": "string" },
+        "grade": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "schoolId", "day", "startTime", "endTime", "subject"]
     }
   },
   "firestore": {
@@ -284,6 +306,10 @@
     "/calls/{callId}": {
       "schema": "Call",
       "description": "Call signaling records"
+    },
+    "/schedules/{scheduleId}": {
+      "schema": "Schedule",
+      "description": "School schedules"
     }
   }
 }

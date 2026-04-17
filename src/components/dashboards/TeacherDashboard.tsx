@@ -5,7 +5,7 @@ import { db, storage } from '../../lib/firebase';
 import { useAuth } from '../../context/AuthContext';
 import { Student, Announcement } from '../../types';
 import { motion, AnimatePresence } from 'motion/react';
-import { Users, ClipboardCheck, GraduationCap, AlertTriangle, MessageSquare, X, CheckCircle2, AlertCircle, BookOpen, FileText, Clock, Megaphone, Calendar, Plus } from 'lucide-react';
+import { Users, ClipboardCheck, GraduationCap, AlertTriangle, MessageSquare, X, CheckCircle2, AlertCircle, BookOpen, FileText, Clock, Megaphone, Calendar, Plus, Info } from 'lucide-react';
 import { handleFirestoreError, OperationType } from '../../lib/firestore-errors';
 import { Chat } from '../Chat';
 import { ContactList } from '../ContactList';
@@ -38,11 +38,14 @@ export const TeacherDashboard: React.FC = () => {
   const [viewMode, setViewMode] = useState<'my' | 'all'>('all');
   const [teacherSubject, setTeacherSubject] = useState(profile?.subject || '');
   const [unreadTotal, setUnreadTotal] = useState(0);
+  const [selectedSubmission, setSelectedSubmission] = useState<any>(null);
   const [assignments, setAssignments] = useState<any[]>([]);
   const [isAddingAssignment, setIsAddingAssignment] = useState(false);
   const [newAssignTitle, setNewAssignTitle] = useState('');
   const [newAssignDesc, setNewAssignDesc] = useState('');
   const [newAssignDueDate, setNewAssignDueDate] = useState('');
+  const [newAssignDeadline, setNewAssignDeadline] = useState('');
+  const [newAnnDeadline, setNewAnnDeadline] = useState('');
 
   useEffect(() => {
     if (!profile?.uid) return;
@@ -279,10 +282,12 @@ export const TeacherDashboard: React.FC = () => {
         fileName,
         fileUrl,
         authorId: profile.uid,
-        createdAt: serverTimestamp()
+        createdAt: serverTimestamp(),
+        deadline: newAnnDeadline ? new Date(newAnnDeadline) : null
       });
       setNewAnnTitle('');
       setNewAnnContent('');
+      setNewAnnDeadline('');
       setAnnFile(null);
       setIsAddingAnnouncement(false);
     } catch (error) {
@@ -305,11 +310,13 @@ export const TeacherDashboard: React.FC = () => {
         title: newAssignTitle,
         description: newAssignDesc,
         dueDate: newAssignDueDate ? new Date(newAssignDueDate) : null,
+        deadline: newAssignDeadline ? new Date(newAssignDeadline) : null,
         createdAt: serverTimestamp()
       });
       setNewAssignTitle('');
       setNewAssignDesc('');
       setNewAssignDueDate('');
+      setNewAssignDeadline('');
       setIsAddingAssignment(false);
       alert('Assignment created successfully!');
     } catch (error) {
@@ -662,9 +669,21 @@ export const TeacherDashboard: React.FC = () => {
                     </span>
                   </td>
                   <td className="p-4 text-right space-x-2">
+                    <button 
+                      onClick={() => setSelectedSubmission(sub)}
+                      className="inline-flex items-center gap-1 text-slate-500 font-bold text-xs hover:text-blue-600 transition-colors"
+                    >
+                      <Info className="w-3 h-3" /> Details
+                    </button>
                     {sub.fileUrl && (
-                      <a href={sub.fileUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-blue-600 font-bold text-xs hover:underline">
-                        <FileText className="w-3 h-3" /> View
+                      <a 
+                        href={sub.fileUrl} 
+                        target="_blank" 
+                        rel="noopener noreferrer" 
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 font-black text-[10px] uppercase rounded-lg hover:bg-blue-100 transition-all border border-blue-100 dark:border-blue-800"
+                      >
+                        <FileText className="w-3.5 h-3.5" />
+                        View File
                       </a>
                     )}
                     <button 
@@ -683,10 +702,75 @@ export const TeacherDashboard: React.FC = () => {
         </div>
       ) : activeTab === ('announcements' as any) ? (
         <div className="space-y-6">
-          <div className="flex items-center gap-2 text-slate-900 dark:text-white font-bold text-xl">
-            <Megaphone className="w-6 h-6 text-blue-600" />
-            School Announcements
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-slate-900 dark:text-white font-bold text-xl">
+              <Megaphone className="w-6 h-6 text-blue-600" />
+              School Announcements
+            </div>
+            <button 
+              onClick={() => setIsAddingAnnouncement(!isAddingAnnouncement)}
+              className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold flex items-center gap-2 shadow-lg shadow-blue-100"
+            >
+              {isAddingAnnouncement ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+              {isAddingAnnouncement ? 'Close Form' : 'Post Announcement'}
+            </button>
           </div>
+
+          <AnimatePresence>
+            {isAddingAnnouncement && (
+              <motion.form 
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                onSubmit={handleAddAnnouncement}
+                className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-blue-100 dark:border-slate-800 shadow-lg space-y-4 overflow-hidden"
+              >
+                <input 
+                  type="text" 
+                  placeholder="Announcement Title" 
+                  className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white font-bold"
+                  value={newAnnTitle}
+                  onChange={(e) => setNewAnnTitle(e.target.value)}
+                  required
+                />
+                <textarea 
+                  placeholder="What would you like to announce?" 
+                  className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 min-h-[120px] dark:text-white"
+                  value={newAnnContent}
+                  onChange={(e) => setNewAnnContent(e.target.value)}
+                  required
+                />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-500 uppercase px-1">Attach File (Optional)</label>
+                    <input 
+                      type="file" 
+                      onChange={(e) => setAnnFile(e.target.files?.[0] || null)}
+                      className="w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-bold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-500 uppercase px-1">Auto-Delete Deadline</label>
+                    <input 
+                      type="datetime-local" 
+                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
+                      value={newAnnDeadline}
+                      onChange={(e) => setNewAnnDeadline(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="flex justify-end gap-3 pt-2">
+                  <button 
+                    type="submit"
+                    className="px-8 py-3 bg-blue-600 text-white rounded-xl font-bold shadow-lg shadow-blue-200"
+                  >
+                    Post to School Board
+                  </button>
+                </div>
+              </motion.form>
+            )}
+          </AnimatePresence>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {announcements.map((ann) => (
               <div key={ann.id} className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm">
@@ -752,7 +836,17 @@ export const TeacherDashboard: React.FC = () => {
                   className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
                   value={newAssignDueDate}
                   onChange={(e) => setNewAssignDueDate(e.target.value)}
+                  title="Due Date"
                 />
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-slate-400 uppercase px-1">Auto-Delete Deadline</label>
+                  <input 
+                    type="datetime-local" 
+                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
+                    value={newAssignDeadline}
+                    onChange={(e) => setNewAssignDeadline(e.target.value)}
+                  />
+                </div>
               </div>
               <textarea 
                 placeholder="Describe the task for your students..." 
@@ -905,6 +999,100 @@ export const TeacherDashboard: React.FC = () => {
                     </button>
                   </div>
                 )}
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {selectedSubmission && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={() => setSelectedSubmission(null)} />
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0, y: 20 }} 
+              animate={{ scale: 1, opacity: 1, y: 0 }} 
+              className="relative bg-white dark:bg-slate-900 w-full max-w-lg rounded-[2.5rem] shadow-2xl overflow-hidden"
+            >
+              <div className="h-24 bg-blue-600 flex items-center justify-between px-8 text-white">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-white/20 rounded-xl">
+                    <BookOpen />
+                  </div>
+                  <h3 className="text-xl font-black uppercase tracking-tight">Submission Details</h3>
+                </div>
+                <button onClick={() => setSelectedSubmission(null)} className="p-2 hover:bg-white/20 rounded-xl transition-all"><X /></button>
+              </div>
+
+              <div className="p-8 space-y-6">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Student</h4>
+                    <div className="text-xl font-black text-slate-900 dark:text-white">{selectedSubmission.studentName}</div>
+                  </div>
+                  <div className="text-right">
+                    <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Status</h4>
+                    <span className={`text-[10px] font-black uppercase px-2 py-1 rounded-full ${
+                      selectedSubmission.status === 'submitted' ? 'bg-amber-100 text-amber-600' : 'bg-emerald-100 text-emerald-600'
+                    }`}>
+                      {selectedSubmission.status}
+                    </span>
+                  </div>
+                </div>
+
+                <div>
+                  <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Homework Title</h4>
+                  <div className="text-lg font-bold text-slate-700 dark:text-slate-300">{selectedSubmission.title}</div>
+                </div>
+
+                {selectedSubmission.description && (
+                  <div>
+                    <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Student Notes</h4>
+                    <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl text-slate-600 dark:text-slate-400 text-sm leading-relaxed border border-slate-100 dark:border-slate-800">
+                      {selectedSubmission.description}
+                    </div>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-800">
+                    <div className="text-[10px] font-black uppercase text-slate-400 mb-1">Submitted On</div>
+                    <div className="font-bold text-slate-900 dark:text-white text-sm">
+                      {selectedSubmission.submittedAt?.toDate().toLocaleString()}
+                    </div>
+                  </div>
+                  {selectedSubmission.fileUrl && (
+                    <a 
+                      href={selectedSubmission.fileUrl} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-2xl border border-blue-100 dark:border-blue-800 flex flex-col justify-center gap-1 group animate-pulse"
+                    >
+                      <div className="text-[10px] font-black uppercase text-blue-400">Attached File (Action Required)</div>
+                      <div className="font-bold text-blue-600 flex items-center gap-2 group-hover:underline">
+                        <FileText className="w-4 h-4" /> View Student File
+                      </div>
+                    </a>
+                  )}
+                </div>
+
+                <div className="flex gap-3">
+                  <button 
+                    onClick={() => {
+                      handleUpdateSubmissionStatus(selectedSubmission.id, selectedSubmission.status);
+                      setSelectedSubmission(null);
+                    }}
+                    className={`flex-1 py-4 rounded-2xl font-black text-sm uppercase tracking-widest shadow-xl transition-all active:scale-95 ${
+                      selectedSubmission.status === 'submitted' ? 'bg-emerald-500 text-white' : 'bg-slate-200 text-slate-600'
+                    }`}
+                  >
+                    {selectedSubmission.status === 'submitted' ? 'Mark as Reviewed' : 'Re-mark as Submitted'}
+                  </button>
+                  <button 
+                    onClick={() => setSelectedSubmission(null)}
+                    className="px-6 py-4 bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-2xl font-black text-sm uppercase tracking-widest shadow-xl"
+                  >
+                    Close
+                  </button>
+                </div>
               </div>
             </motion.div>
           </div>

@@ -14,10 +14,19 @@ import {
   Activity, 
   Megaphone,
   X,
-  FileText
+  FileText,
+  MessageSquare,
+  Search,
+  Plus,
+  ArrowLeft,
+  Info
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
+import { PrivateMessaging } from '../PrivateMessaging';
+import { Chat } from '../Chat';
+
+import { UserProfile } from '../../types';
 
 interface Student {
   id: string;
@@ -39,7 +48,12 @@ export const ChildDashboard: React.FC<{ onStartCall?: (channel: string, receiver
   const { profile, user } = useAuth();
   const [studentData, setStudentData] = useState<Student | null>(null);
   const [isSOSActive, setIsSOSActive] = useState(false);
-  const [activeModal, setActiveModal] = useState<'homework' | 'sos' | null>(null);
+  const [activeTab, setActiveTab] = useState<'home' | 'messages'>('home');
+  const [activeModal, setActiveModal] = useState<'homework' | 'sos' | 'detail' | null>(null);
+  const [selectedAssignment, setSelectedAssignment] = useState<any>(null);
+  const [selectedDetail, setSelectedDetail] = useState<any>(null);
+  const [selectedTeacher, setSelectedTeacher] = useState<{ uid: string, displayName: string } | null>(null);
+  const [schoolTeachers, setSchoolTeachers] = useState<any[]>([]);
   const [homeworkTitle, setHomeworkTitle] = useState('');
   const [homeworkDescription, setHomeworkDescription] = useState('');
   const [homeworkExternalLink, setHomeworkExternalLink] = useState('');
@@ -54,6 +68,7 @@ export const ChildDashboard: React.FC<{ onStartCall?: (channel: string, receiver
   const [quranProgress, setQuranProgress] = useState<any[]>([]);
   const [sportsTraining, setSportsTraining] = useState<any[]>([]);
   const [assignments, setAssignments] = useState<any[]>([]);
+  const [schedules, setSchedules] = useState<any[]>([]);
 
   useEffect(() => {
     if (!user?.uid) return;
@@ -67,6 +82,19 @@ export const ChildDashboard: React.FC<{ onStartCall?: (channel: string, receiver
     });
     return () => unsubscribe();
   }, [user?.uid]);
+
+  useEffect(() => {
+    if (!profile?.schoolId) return;
+    const q = query(
+      collection(db, 'users'),
+      where('schoolId', '==', profile.schoolId),
+      where('role', 'in', ['teacher', 'quran_teacher', 'sports_coach'])
+    );
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setSchoolTeachers(snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() })));
+    });
+    return () => unsubscribe();
+  }, [profile?.schoolId]);
 
   useEffect(() => {
     if (!studentData?.schoolId) return;
@@ -133,12 +161,31 @@ export const ChildDashboard: React.FC<{ onStartCall?: (channel: string, receiver
       (snapshot) => setSportsTraining(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })))
     );
 
+    const unsubSchedules = onSnapshot(
+      query(collection(db, 'schedules'), where('schoolId', '==', studentData.schoolId)),
+      (snapshot) => setSchedules(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })))
+    );
+
     return () => {
       unsubAssignments();
       unsubQuran();
       unsubSports();
+      unsubSchedules();
     };
   }, [studentData?.id]);
+
+  const formatDate = (val: any) => {
+    if (!val) return '';
+    if (typeof val === 'string') return val;
+    if (val && typeof val === 'object' && 'seconds' in val) {
+      try {
+        return new Date(val.seconds * 1000).toLocaleString();
+      } catch (e) {
+        return 'Invalid Date';
+      }
+    }
+    return String(val);
+  };
 
   const triggerSOS = async () => {
     if (!user?.uid || !studentData?.parentUid) return;
@@ -221,80 +268,387 @@ export const ChildDashboard: React.FC<{ onStartCall?: (channel: string, receiver
           </h1>
           <p className="text-slate-500 font-medium mt-1">Ready for another great day of learning?</p>
         </div>
+        <div className="flex gap-2">
+          <button 
+            onClick={() => setActiveTab('home')}
+            className={`px-6 py-3 rounded-2xl font-black text-sm transition-all ${activeTab === 'home' ? 'bg-blue-600 text-white shadow-lg shadow-blue-200 dark:shadow-none' : 'bg-white dark:bg-slate-900 text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+          >
+            Dashboard
+          </button>
+          <button 
+            onClick={() => setActiveTab('messages')}
+            className={`px-6 py-3 rounded-2xl font-black text-sm transition-all relative ${activeTab === 'messages' ? 'bg-blue-600 text-white shadow-lg shadow-blue-200 dark:shadow-none' : 'bg-white dark:bg-slate-900 text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+          >
+            Messages
+            {unreadTotal > 0 && (
+              <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-[10px] flex items-center justify-center rounded-full border-2 border-white dark:border-slate-900 font-bold">
+                {unreadTotal}
+              </span>
+            )}
+          </button>
+        </div>
       </header>
 
-      <section className="bg-white dark:bg-slate-900 p-10 rounded-[3rem] border border-slate-100 shadow-2xl text-center space-y-8">
-        <div className="flex flex-col items-center">
-          <div className="relative">
-            <AnimatePresence>
-              {isSOSActive && <motion.div animate={{ scale: 2, opacity: 0 }} transition={{ repeat: Infinity, duration: 1.5 }} className="absolute inset-0 bg-red-500 rounded-full" />}
-            </AnimatePresence>
-            <motion.button onClick={triggerSOS} className={`w-36 h-36 rounded-full flex items-center justify-center relative z-10 ${isSOSActive ? 'bg-red-600' : 'bg-red-500'}`}>
-              <ShieldAlert className="w-16 h-16 text-white" />
-            </motion.button>
-          </div>
-          <h3 className="mt-8 text-2xl font-black tracking-widest uppercase">SOS Emergency</h3>
-        </div>
-      </section>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-        <div className="bg-slate-900 p-8 rounded-[2.5rem] text-white shadow-2xl space-y-6">
-          <div className="flex justify-between items-center">
-            <h3 className="text-xl font-black flex items-center gap-3"><BookOpen className="text-blue-400" /> Assignments</h3>
-            <button onClick={() => setActiveModal('homework')} className="bg-blue-600 px-6 py-3 rounded-2xl font-black">Submit Work</button>
-          </div>
-          <div className="space-y-4 max-h-[300px] overflow-y-auto">
-            {assignments.map(a => (
-              <div key={a.id} className="p-6 bg-white/5 rounded-3xl border border-white/10">
-                <div className="font-black">{a.title}</div>
-                <p className="text-sm text-slate-400 mt-2">{a.description}</p>
+      {activeTab === 'messages' ? (
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
+          <PrivateMessaging />
+        </motion.div>
+      ) : (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-10">
+          <section className="bg-white dark:bg-slate-900 p-10 rounded-[3rem] border border-slate-100 dark:border-slate-800 shadow-2xl text-center space-y-8">
+            <div className="flex flex-col items-center">
+              <div className="relative">
+                <AnimatePresence>
+                  {isSOSActive && <motion.div animate={{ scale: 2, opacity: 0 }} transition={{ repeat: Infinity, duration: 1.5 }} className="absolute inset-0 bg-red-500 rounded-full" />}
+                </AnimatePresence>
+                <motion.button onClick={triggerSOS} className={`w-36 h-36 rounded-full flex items-center justify-center relative z-10 ${isSOSActive ? 'bg-red-600' : 'bg-red-500'}`}>
+                  <ShieldAlert className="w-16 h-16 text-white" />
+                </motion.button>
               </div>
-            ))}
-          </div>
-        </div>
+              <h3 className="mt-8 text-2xl font-black tracking-widest uppercase text-slate-900 dark:text-white">SOS Emergency</h3>
+            </div>
+          </section>
 
-        <div className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border border-slate-100 shadow-xl space-y-6">
-           <h3 className="text-lg font-black flex items-center gap-3"><Calendar className="text-blue-600" /> Quran Progress</h3>
-           <div className="space-y-4">
-             {quranProgress.map(p => (
-               <div key={p.id} className="p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl flex justify-between">
-                 <div>
-                   <div className="font-black text-sm">Surah {p.surah}</div>
-                   <div className="text-[10px] text-slate-500">Ayat: {p.ayat}</div>
-                 </div>
-                 <div className="flex text-amber-400 gap-0.5">
-                   {[1,2,3,4,5].map(s => <Star key={s} className={`w-3 h-3 ${s <= p.rating ? 'fill-current' : 'opacity-20'}`} />)}
-                 </div>
-               </div>
-             ))}
-           </div>
-        </div>
-      </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div className="bg-blue-600 p-8 rounded-[2.5rem] text-white shadow-2xl space-y-6">
+              <div className="flex items-center gap-3">
+                <Calendar className="w-6 h-6" />
+                <h3 className="font-black text-xl uppercase tracking-tighter">My Schedule</h3>
+              </div>
+              <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2">
+                {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map(day => {
+                  const daySchedules = schedules.filter(s => s.day === day).sort((a,b) => a.startTime.localeCompare(b.startTime));
+                  if (daySchedules.length === 0) return null;
+                  return (
+                    <div key={day} className="space-y-2">
+                      <div className="text-[10px] font-black text-blue-200 uppercase tracking-widest ml-1">{day}</div>
+                      {daySchedules.map(sch => (
+                        <div key={sch.id} className="flex items-center justify-between p-4 bg-white/10 rounded-2xl border border-white/10">
+                          <div className="flex flex-col">
+                            <span className="font-bold leading-tight">{sch.subject}</span>
+                            <span className="text-[10px] text-blue-100">{sch.teacherName || 'TBD'}</span>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-[10px] font-bold bg-white/20 px-2 py-0.5 rounded-lg whitespace-nowrap">
+                              {sch.startTime} - {sch.endTime}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
+                {schedules.length === 0 && (
+                  <div className="p-10 text-center text-blue-100 italic text-sm border-2 border-dashed border-white/20 rounded-3xl">
+                    No schedule entries found.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="bg-slate-900 p-8 rounded-[2.5rem] text-white shadow-2xl space-y-6">
+              <div className="flex justify-between items-center">
+                <h3 className="text-xl font-black flex items-center gap-3"><BookOpen className="text-blue-400" /> Assignments</h3>
+                <button onClick={() => setActiveModal('homework')} className="bg-blue-600 px-6 py-3 rounded-2xl font-black text-sm">Submit Work</button>
+              </div>
+              <div className="space-y-4 max-h-[300px] overflow-y-auto pr-2">
+                {assignments.length > 0 ? assignments.map(a => (
+                  <div key={a.id} className="p-6 bg-white/5 rounded-3xl border border-white/10 group hover:bg-white/10 transition-colors">
+                    <div className="flex justify-between items-start gap-4">
+                      <div>
+                        <div className="font-black text-lg">{a.title}</div>
+                        <p className="text-sm text-slate-400 mt-2 line-clamp-2">{a.description}</p>
+                      </div>
+                      <button 
+                        onClick={() => {
+                          setSelectedDetail({ ...a, type: 'assignment' });
+                          setActiveModal('detail');
+                        }}
+                        className="p-3 bg-white/10 rounded-2xl hover:bg-blue-600 transition-colors flex items-center gap-2 group-hover:scale-105"
+                      >
+                        <Info className="w-4 h-4" />
+                        <span className="text-[10px] font-black uppercase">Details</span>
+                      </button>
+                    </div>
+                  </div>
+                )) : (
+                  <div className="text-center py-10 text-slate-500 italic">No assignments yet</div>
+                )}
+              </div>
+            </div>
+
+            <div className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 shadow-xl space-y-6">
+              <h3 className="text-lg font-black flex items-center gap-3 text-slate-900 dark:text-white">
+                <Calendar className="text-blue-600" /> Quran Progress
+              </h3>
+              <div className="space-y-4 max-h-[300px] overflow-y-auto pr-2">
+                {quranProgress.length > 0 ? quranProgress.map(p => (
+                  <div key={p.id} className="p-4 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-2xl flex justify-between items-center group hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">
+                    <div>
+                      <div className="font-black text-sm text-slate-900 dark:text-white">Surah {p.surah}</div>
+                      <div className="text-[10px] text-slate-500 dark:text-slate-400">Ayat: {p.ayat}</div>
+                      <div className="flex text-amber-400 gap-0.5 mt-2">
+                        {[1,2,3,4,5].map(s => <Star key={s} className={`w-3 h-3 ${s <= p.rating ? 'fill-current' : 'opacity-20'}`} />)}
+                      </div>
+                    </div>
+                    <button 
+                      onClick={() => {
+                        setSelectedDetail({ ...p, type: 'quran' });
+                        setActiveModal('detail');
+                      }}
+                      className="p-3 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl hover:text-blue-600 transition-colors flex items-center gap-2 group-hover:scale-105 shadow-sm"
+                    >
+                      <Info className="w-4 h-4" />
+                      <span className="text-[10px] font-black uppercase">Details</span>
+                    </button>
+                  </div>
+                )) : (
+                  <div className="text-center py-10 text-slate-400 italic">No progress recorded</div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Contact Teachers */}
+          <div className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 shadow-xl space-y-6">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xl font-black flex items-center gap-3 text-slate-900 dark:text-white">
+                <MessageSquare className="text-indigo-500" /> Contact Your Teachers
+              </h3>
+            </div>
+            <div className="flex gap-6 overflow-x-auto pb-6 scrollbar-hide px-2">
+              {schoolTeachers.map(teacher => (
+                <button
+                  key={teacher.uid}
+                  onClick={() => {
+                    setSelectedTeacher({ uid: teacher.uid, displayName: teacher.displayName || teacher.email || 'Teacher' });
+                  }}
+                  className="flex flex-col items-center gap-2 shrink-0 group"
+                >
+                  <div className="relative">
+                    <div className="w-16 h-16 bg-indigo-50 dark:bg-indigo-900/30 rounded-3xl flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-black text-xl group-hover:scale-110 transition-all border-2 border-transparent group-hover:border-indigo-200 shadow-sm">
+                      {teacher.displayName?.[0] || 'T'}
+                    </div>
+                    <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-emerald-500 border-2 border-white dark:border-slate-900 rounded-full shadow-sm" />
+                  </div>
+                  <span className="text-[10px] font-black text-slate-600 dark:text-slate-400 text-center max-w-[80px] truncate uppercase tracking-tighter">
+                    {teacher.displayName || 'Teacher'}
+                  </span>
+                </button>
+              ))}
+              {schoolTeachers.length === 0 && (
+                <p className="text-xs text-slate-400 italic py-4">No teachers found in your school.</p>
+              )}
+            </div>
+          </div>
+
+          <section className="bg-emerald-600 p-8 rounded-[3rem] text-white shadow-2xl relative overflow-hidden group">
+            <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:scale-110 transition-transform">
+              <Activity className="w-48 h-48" />
+            </div>
+            <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+              <div>
+                <h3 className="text-2xl font-black flex items-center gap-3"><Activity /> Sports & Physical Training</h3>
+                <p className="text-emerald-100 mt-2 font-medium">Keep moving and stay healthy! View your latest training records.</p>
+              </div>
+              <div className="flex gap-4 w-full md:w-auto">
+                {sportsTraining.length > 0 ? (
+                  <div className="flex-1 md:flex-none p-4 bg-white/10 rounded-3xl border border-white/10 flex items-center justify-between gap-6 pointer-events-none">
+                     <div>
+                       <div className="text-[10px] font-black uppercase tracking-widest text-emerald-200">Last Activity</div>
+                       <div className="font-black text-lg">{sportsTraining[0].activity}</div>
+                     </div>
+                     <div className="text-right">
+                       <div className="text-2xl font-black">{sportsTraining[0].duration}m</div>
+                       <div className="text-[10px] font-black uppercase tracking-widest text-emerald-200">Duration</div>
+                     </div>
+                  </div>
+                ) : (
+                  <div className="text-emerald-200 italic font-medium">No training sessions recorded yet</div>
+                )}
+                <button 
+                  onClick={() => {
+                    if (sportsTraining.length > 0) {
+                      setSelectedDetail({ ...sportsTraining[0], type: 'sports' });
+                      setActiveModal('detail');
+                    } else {
+                      toast.info("No training details to show yet!");
+                    }
+                  }}
+                  className="px-6 py-4 bg-white text-emerald-600 rounded-[1.5rem] font-black text-sm shadow-xl hover:scale-105 transition-transform shrink-0 flex items-center gap-2"
+                >
+                  <Info className="w-4 h-4" />
+                  View Details
+                </button>
+              </div>
+            </div>
+          </section>
+        </motion.div>
+      )}
 
       <AnimatePresence>
+        {selectedTeacher && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setSelectedTeacher(null)}
+              className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="relative bg-white dark:bg-slate-900 w-full max-w-md rounded-[2.5rem] shadow-2xl overflow-hidden"
+            >
+              <div className="p-8">
+                <div className="flex items-center justify-between mb-6">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-indigo-100 dark:bg-indigo-900/30 rounded-2xl flex items-center justify-center text-indigo-600">
+                      <MessageSquare className="w-6 h-6" />
+                    </div>
+                    <h3 className="text-xl font-black text-slate-900 dark:text-white">Chat with {selectedTeacher.displayName}</h3>
+                  </div>
+                  <button onClick={() => setSelectedTeacher(null)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors">
+                    <X className="w-6 h-6 text-slate-400" />
+                  </button>
+                </div>
+                <div className="h-[400px] bg-slate-50 dark:bg-slate-800 rounded-3xl overflow-hidden shadow-inner border border-slate-100 dark:border-slate-800">
+                  <Chat receiverId={selectedTeacher.uid} receiverName={selectedTeacher.displayName} />
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {activeModal === 'detail' && selectedDetail && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={() => setActiveModal(null)} />
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0, y: 20 }} 
+              animate={{ scale: 1, opacity: 1, y: 0 }} 
+              className="relative bg-white dark:bg-slate-900 w-full max-w-lg rounded-[2.5rem] shadow-2xl overflow-hidden"
+            >
+              <div className={`h-24 flex items-center justify-between px-8 text-white ${
+                selectedDetail.type === 'assignment' ? 'bg-blue-600' :
+                selectedDetail.type === 'quran' ? 'bg-amber-500' :
+                'bg-emerald-600'
+              }`}>
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-white/20 rounded-xl">
+                    {selectedDetail.type === 'assignment' ? <BookOpen /> :
+                     selectedDetail.type === 'quran' ? <Calendar /> : <Activity />}
+                  </div>
+                  <h3 className="text-xl font-black uppercase tracking-tight">Detail View</h3>
+                </div>
+                <button onClick={() => setActiveModal(null)} className="p-2 hover:bg-white/20 rounded-xl transition-all"><X /></button>
+              </div>
+
+              <div className="p-8 space-y-6">
+                <div>
+                  <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Title / Activity</h4>
+                  <div className="text-2xl font-black text-slate-900 dark:text-white">
+                    {selectedDetail.title || selectedDetail.surah || selectedDetail.activity}
+                  </div>
+                </div>
+
+                {selectedDetail.type === 'assignment' && (
+                  <>
+                    <div>
+                      <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Due Date</h4>
+                      <div className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-2">
+                        <Clock className="w-4 h-4 text-blue-500" />
+                        {formatDate(selectedDetail.dueDate) || 'No due date set'}
+                      </div>
+                    </div>
+                    <div>
+                      <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Instructions</h4>
+                      <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl text-slate-600 dark:text-slate-400 text-sm leading-relaxed border border-slate-100 dark:border-slate-800">
+                        {selectedDetail.description || 'No additional instructions provided.'}
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {selectedDetail.type === 'quran' && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-800">
+                      <div className="text-[10px] font-black uppercase text-slate-400 mb-1">Ayat Range</div>
+                      <div className="font-black text-slate-900 dark:text-white uppercase">{selectedDetail.ayat}</div>
+                    </div>
+                    <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-800">
+                      <div className="text-[10px] font-black uppercase text-slate-400 mb-1">Teacher Rating</div>
+                      <div className="flex text-amber-400 gap-1">
+                        {[1,2,3,4,5].map(s => <Star key={s} className={`w-4 h-4 ${s <= selectedDetail.rating ? 'fill-current' : 'opacity-20'}`} />)}
+                      </div>
+                    </div>
+                    {selectedDetail.comment && (
+                      <div className="col-span-2">
+                        <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Teacher's Comment</h4>
+                        <div className="p-4 bg-amber-50 dark:bg-amber-900/10 text-amber-900 dark:text-amber-200 rounded-2xl text-sm italic border border-amber-100 dark:border-amber-900/20">
+                          "{selectedDetail.comment}"
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {selectedDetail.type === 'sports' && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-800">
+                      <div className="text-[10px] font-black uppercase text-slate-400 mb-1">Duration</div>
+                      <div className="font-black text-slate-900 dark:text-white text-xl">{selectedDetail.duration} min</div>
+                    </div>
+                    <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-800">
+                      <div className="text-[10px] font-black uppercase text-slate-400 mb-1">Intensity</div>
+                      <div className="font-black text-slate-900 dark:text-white uppercase">{selectedDetail.intensity || 'Normal'}</div>
+                    </div>
+                    {selectedDetail.notes && (
+                      <div className="col-span-2">
+                        <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Training Notes</h4>
+                        <div className="p-4 bg-emerald-50 dark:bg-emerald-900/10 text-emerald-900 dark:text-emerald-200 rounded-2xl text-sm border border-emerald-100 dark:border-emerald-900/20">
+                          {selectedDetail.notes}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <button 
+                  onClick={() => setActiveModal(null)}
+                  className="w-full py-4 bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-2xl font-black text-sm uppercase tracking-widest shadow-xl"
+                >
+                  Close Detail
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
         {activeModal === 'homework' && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm" onClick={() => !isSubmitting && setActiveModal(null)} />
             <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="relative bg-white dark:bg-slate-900 w-full max-w-md rounded-[2.5rem] shadow-2xl p-8">
               <div className="flex justify-between items-center mb-6">
-                <h3 className="text-xl font-black">Submit Homework</h3>
-                <button onClick={() => setActiveModal(null)}><X /></button>
+                <h3 className="text-xl font-black text-slate-900 dark:text-white">Submit Homework</h3>
+                <button onClick={() => setActiveModal(null)} className="dark:text-white"><X /></button>
               </div>
               <div className="space-y-5">
-                <select className="w-full p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl" value={selectedTeacherId} onChange={e => setSelectedTeacherId(e.target.value)}>
+                <select className="w-full p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl dark:text-white" value={selectedTeacherId} onChange={e => setSelectedTeacherId(e.target.value)}>
                   <option value="">Select Teacher</option>
                   {teacherProfiles.map(t => <option key={t.uid} value={t.uid}>{t.name}</option>)}
                 </select>
-                <input placeholder="Title" className="w-full p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl" value={homeworkTitle} onChange={e => setHomeworkTitle(e.target.value)} />
-                <textarea placeholder="Description" className="w-full p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl min-h-[100px]" value={homeworkDescription} onChange={e => setHomeworkDescription(e.target.value)} />
+                <input placeholder="Title" className="w-full p-4 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-2xl dark:text-white" value={homeworkTitle} onChange={e => setHomeworkTitle(e.target.value)} />
+                <textarea placeholder="Description" className="w-full p-4 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-2xl min-h-[100px] dark:text-white" value={homeworkDescription} onChange={e => setHomeworkDescription(e.target.value)} />
                 
                 <input type="file" id="h-up" className="hidden" onChange={e => setSelectedFile(e.target.files?.[0] || null)} />
-                <label htmlFor="h-up" className={`block p-6 border-2 border-dashed rounded-3xl text-center cursor-pointer ${selectedFile ? 'border-emerald-500 bg-emerald-50' : 'border-slate-100'}`}>
-                   {selectedFile ? <span className="text-emerald-600 font-bold">{selectedFile.name}</span> : <span className="text-slate-400">Upload File (Max 10MB)</span>}
+                <label htmlFor="h-up" className={`block p-6 border-2 border-dashed rounded-3xl text-center cursor-pointer ${selectedFile ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/10' : 'border-slate-100 dark:border-slate-800'}`}>
+                   {selectedFile ? <span className="text-emerald-600 dark:text-emerald-400 font-bold">{selectedFile.name}</span> : <span className="text-slate-400">Upload File (Max 10MB)</span>}
                 </label>
 
-                <div className="relative py-2 text-center text-[10px] font-black text-slate-300 uppercase tracking-widest">OR PROVIDE LINK</div>
-                <input type="url" placeholder="Paste link (Google Drive, etc.)" className="w-full p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl text-sm" value={homeworkExternalLink} onChange={e => setHomeworkExternalLink(e.target.value)} />
+                <div className="relative py-2 text-center text-[10px] font-black text-slate-300 dark:text-slate-600 uppercase tracking-widest">OR PROVIDE LINK</div>
+                <input type="url" placeholder="Paste link (Google Drive, etc.)" className="w-full p-4 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-2xl text-sm dark:text-white" value={homeworkExternalLink} onChange={e => setHomeworkExternalLink(e.target.value)} />
 
                 <button onClick={handleHomeworkSubmit} disabled={isSubmitting} className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black shadow-xl disabled:opacity-50">
                   {isSubmitting ? 'Submitting...' : 'Submit to Teacher'}

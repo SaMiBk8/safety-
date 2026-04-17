@@ -7,14 +7,33 @@ import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useSearchParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { ThemeProvider, useTheme } from './context/ThemeContext';
 import { signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
-import { auth } from './lib/firebase';
+import { auth, db } from './lib/firebase';
+import { Sun, Moon } from 'lucide-react';
+import { collection, query, where, onSnapshot, updateDoc, doc, addDoc, serverTimestamp } from 'firebase/firestore';
+import { handleFirestoreError, OperationType } from './lib/firestore-errors';
+
+import { SystemAdminDashboard } from './components/dashboards/SystemAdminDashboard';
+import { SchoolAdminDashboard } from './components/dashboards/SchoolAdminDashboard';
+import { TeacherDashboard } from './components/dashboards/TeacherDashboard';
+import { QuranTeacherDashboard } from './components/dashboards/QuranTeacherDashboard';
+import { SportsCoachDashboard } from './components/dashboards/SportsCoachDashboard';
+import { AuthorizedPersonDashboard } from './components/dashboards/AuthorizedPersonDashboard';
+import { ParentDashboard } from './components/dashboards/ParentDashboard';
+import { ChildDashboard } from './components/dashboards/ChildDashboard';
+import { VisitorDashboard } from './components/dashboards/VisitorDashboard';
+import { VideoCall } from './components/VideoCall';
+import { IncomingCallModal } from './components/IncomingCallModal';
 
 // Basic Login Component
-const Login = ({ isDarkMode, setIsDarkMode }: { isDarkMode: boolean, setIsDarkMode: (v: boolean) => void }) => {
+const Login = () => {
   const { user, loading } = useAuth();
+  const { theme, toggleTheme } = useTheme();
   const [error, setError] = useState<string | null>(null);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  
+  const isDarkMode = theme === 'dark';
   
   const handleLogin = async () => {
     if (isLoggingIn) return;
@@ -28,7 +47,6 @@ const Login = ({ isDarkMode, setIsDarkMode }: { isDarkMode: boolean, setIsDarkMo
       if (err.code === 'auth/popup-blocked') {
         setError("Sign-in popup was blocked by your browser. Please allow popups for this site.");
       } else if (err.code === 'auth/cancelled-popup-request') {
-        // This often happens if the user clicks twice or another request is pending
         setError("A login request was already in progress or was cancelled.");
       } else if (err.code === 'auth/popup-closed-by-user') {
         setError("Login window was closed before completion.");
@@ -75,12 +93,20 @@ const Login = ({ isDarkMode, setIsDarkMode }: { isDarkMode: boolean, setIsDarkMo
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50 dark:bg-slate-950 p-6 text-center transition-colors duration-300">
-      <div className="fixed top-6 right-6">
+      <div className="fixed top-6 right-6 z-50">
         <button 
-          onClick={() => setIsDarkMode(!isDarkMode)}
-          className="p-3 bg-white dark:bg-slate-900 text-slate-400 hover:text-blue-600 dark:hover:text-amber-400 rounded-2xl shadow-lg shadow-slate-200 dark:shadow-none transition-all"
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            toggleTheme();
+          }}
+          className="p-3 bg-white dark:bg-slate-900 text-slate-400 hover:text-blue-600 dark:hover:text-amber-400 rounded-2xl shadow-lg shadow-slate-200 dark:shadow-none transition-all active:scale-95 border border-slate-100 dark:border-slate-800"
         >
-          {isDarkMode ? <Sun className="w-6 h-6" /> : <Moon className="w-6 h-6" />}
+          {isDarkMode ? (
+            <Sun className="w-6 h-6 animate-pulse" />
+          ) : (
+            <Moon className="w-6 h-6 rotate-12" />
+          )}
         </button>
       </div>
 
@@ -125,21 +151,6 @@ const Login = ({ isDarkMode, setIsDarkMode }: { isDarkMode: boolean, setIsDarkMo
   );
 };
 
-import { SystemAdminDashboard } from './components/dashboards/SystemAdminDashboard';
-import { SchoolAdminDashboard } from './components/dashboards/SchoolAdminDashboard';
-import { TeacherDashboard } from './components/dashboards/TeacherDashboard';
-import { QuranTeacherDashboard } from './components/dashboards/QuranTeacherDashboard';
-import { SportsCoachDashboard } from './components/dashboards/SportsCoachDashboard';
-import { AuthorizedPersonDashboard } from './components/dashboards/AuthorizedPersonDashboard';
-import { ParentDashboard } from './components/dashboards/ParentDashboard';
-import { ChildDashboard } from './components/dashboards/ChildDashboard';
-import { VisitorDashboard } from './components/dashboards/VisitorDashboard';
-import { VideoCall } from './components/VideoCall';
-import { IncomingCallModal } from './components/IncomingCallModal';
-import { collection, query, where, onSnapshot, updateDoc, doc, addDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from './lib/firebase';
-import { handleFirestoreError, OperationType } from './lib/firestore-errors';
-
 const VideoCallWrapper = () => {
   const [searchParams] = useSearchParams();
   const channel = searchParams.get('channel') || 'test';
@@ -154,12 +165,14 @@ const VideoCallWrapper = () => {
     />
   );
 };
-import { Sun, Moon } from 'lucide-react';
 
-const Dashboard = ({ isDarkMode, setIsDarkMode }: { isDarkMode: boolean, setIsDarkMode: (v: boolean) => void }) => {
-  const { user, profile, loading, isAdmin, isSchoolAdmin, isTeacher, isQuranTeacher, isSportsCoach, isParent, isChild, isAuthorizedPerson, isVisitor, isPending } = useAuth();
+const Dashboard = () => {
+  const { user, profile, loading, isAdmin, isSchoolAdmin, isTeacher, isQuranTeacher, isSportsCoach, isParent, isChild, isAuthorizedPerson, isVisitor } = useAuth();
+  const { theme, toggleTheme } = useTheme();
   const [activeCall, setActiveCall] = useState<{ channel: string } | null>(null);
   const [incomingCall, setIncomingCall] = useState<{ id: string, callerName: string, channel: string } | null>(null);
+  
+  const isDarkMode = theme === 'dark';
 
   useEffect(() => {
     if (!user?.uid) return;
@@ -277,8 +290,12 @@ const Dashboard = ({ isDarkMode, setIsDarkMode }: { isDarkMode: boolean, setIsDa
             
             <div className="flex items-center gap-4">
               <button 
-                onClick={() => setIsDarkMode(!isDarkMode)}
-                className="p-2.5 bg-slate-50 dark:bg-slate-800 text-slate-400 hover:text-blue-600 dark:hover:text-amber-400 rounded-xl transition-all active:scale-90"
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  toggleTheme();
+                }}
+                className="p-2.5 bg-slate-50 dark:bg-slate-800 text-slate-400 hover:text-blue-600 dark:hover:text-amber-400 rounded-xl transition-all active:scale-90 relative z-50"
               >
                 {isDarkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
               </button>
@@ -418,8 +435,12 @@ const Dashboard = ({ isDarkMode, setIsDarkMode }: { isDarkMode: boolean, setIsDa
           <span className="text-[10px] font-bold uppercase tracking-wider">Home</span>
         </button>
         <button 
-          onClick={() => setIsDarkMode(!isDarkMode)}
-          className="flex flex-col items-center gap-1 text-slate-400"
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            toggleTheme();
+          }}
+          className="flex flex-col items-center gap-1 text-slate-400 active:text-blue-600 dark:active:text-amber-400"
         >
           {isDarkMode ? <Sun className="w-6 h-6" /> : <Moon className="w-6 h-6" />}
           <span className="text-[10px] font-bold uppercase tracking-wider">Theme</span>
@@ -458,36 +479,21 @@ import { Toaster } from 'sonner';
 
 export default function App() {
   const [isSplashVisible, setIsSplashVisible] = useState(true);
-  const [isDarkMode, setIsDarkMode] = useState(() => {
-    const saved = localStorage.getItem('darkMode');
-    if (saved !== null) return JSON.parse(saved);
-    return window.matchMedia('(prefers-color-scheme: dark)').matches;
-  });
-
-  useEffect(() => {
-    if (isDarkMode) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
-    localStorage.setItem('darkMode', JSON.stringify(isDarkMode));
-  }, [isDarkMode]);
-
-  useEffect(() => {
-    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-    const handleChange = (e: MediaQueryListEvent) => {
-      if (localStorage.getItem('darkMode') === null) {
-        setIsDarkMode(e.matches);
-      }
-    };
-    mediaQuery.addEventListener('change', handleChange);
-    return () => mediaQuery.removeEventListener('change', handleChange);
-  }, []);
 
   useEffect(() => {
     const timer = setTimeout(() => setIsSplashVisible(false), 2000);
     return () => clearTimeout(timer);
   }, []);
+
+  return (
+    <ThemeProvider>
+      <AppContent isSplashVisible={isSplashVisible} />
+    </ThemeProvider>
+  );
+}
+
+function AppContent({ isSplashVisible }: { isSplashVisible: boolean }) {
+  const { theme } = useTheme();
 
   if (isSplashVisible) {
     return (
@@ -516,12 +522,12 @@ export default function App() {
 
   return (
     <AuthProvider>
-      <Toaster position="top-center" richColors />
+      <Toaster position="top-center" richColors theme={theme} />
       <Router>
         <AnimatePresence mode="wait">
           <Routes>
-            <Route path="/" element={<Login isDarkMode={isDarkMode} setIsDarkMode={setIsDarkMode} />} />
-            <Route path="/dashboard" element={<Dashboard isDarkMode={isDarkMode} setIsDarkMode={setIsDarkMode} />} />
+            <Route path="/" element={<Login />} />
+            <Route path="/dashboard" element={<Dashboard />} />
           </Routes>
         </AnimatePresence>
       </Router>

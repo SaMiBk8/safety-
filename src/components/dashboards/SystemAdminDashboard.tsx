@@ -4,7 +4,7 @@ import { db } from '../../lib/firebase';
 import { useAuth } from '../../context/AuthContext';
 import { UserProfile, School } from '../../types';
 import { motion, AnimatePresence } from 'motion/react';
-import { Shield, UserX, UserCheck, Search, MessageSquare, Clock, CheckCircle2, X, FileText, Trash2, Users, Plus, AlertCircle } from 'lucide-react';
+import { Shield, UserX, UserCheck, Search, MessageSquare, Clock, CheckCircle2, X, FileText, Trash2, Users, Plus, AlertCircle, Info } from 'lucide-react';
 import { handleFirestoreError, OperationType } from '../../lib/firestore-errors';
 
 interface VisitorMessage {
@@ -41,6 +41,7 @@ export const SystemAdminDashboard: React.FC = () => {
   const [showCleanupConfirm, setShowCleanupConfirm] = useState(false);
   const [showCleanupMessagesConfirm, setShowCleanupMessagesConfirm] = useState(false);
   const [selectedFeedback, setSelectedFeedback] = useState<any | null>(null);
+  const [selectedUserForDetails, setSelectedUserForDetails] = useState<any | null>(null);
   const [unreadPrivateCount, setUnreadPrivateCount] = useState(0);
 
   useEffect(() => {
@@ -145,10 +146,15 @@ export const SystemAdminDashboard: React.FC = () => {
   const approveUser = async (uid: string) => {
     try {
       const userToApprove = users.find(u => u.uid === uid);
-      await updateDoc(doc(db, 'users', uid), { status: 'active' });
+      const updates: any = { status: 'active' };
+      if (userToApprove?.requestedRole) {
+        updates.role = userToApprove.requestedRole;
+      }
+      await updateDoc(doc(db, 'users', uid), updates);
       
-      if (userToApprove?.requestedRole === 'child' || userToApprove?.role === 'child') {
-        await ensureStudentRecord(uid, userToApprove.displayName || userToApprove.email, userToApprove.schoolId || '');
+      const updatedRole = userToApprove?.requestedRole || userToApprove?.role;
+      if (updatedRole === 'child') {
+        await ensureStudentRecord(uid, userToApprove?.displayName || userToApprove?.email || 'Student', userToApprove?.schoolId || '');
       }
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `users/${uid}`, user || undefined);
@@ -634,7 +640,14 @@ export const SystemAdminDashboard: React.FC = () => {
                       </div>
                     )}
                   </td>
-                  <td className="p-4 text-right space-x-2">
+                  <td className="p-4 text-right flex items-center justify-end gap-2">
+                    <button 
+                      onClick={() => setSelectedUserForDetails(user)}
+                      className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
+                      title="View Details"
+                    >
+                      <Info className="w-5 h-5" />
+                    </button>
                     <button 
                       onClick={() => approveUser(user.uid)}
                       className="px-4 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 transition-colors"
@@ -808,6 +821,13 @@ export const SystemAdminDashboard: React.FC = () => {
                   </div>
                 )}
                 <div className="flex justify-end gap-2 pt-2">
+                  <button 
+                    onClick={() => setSelectedUserForDetails({ ...msg, registrationMessage: msg.message })}
+                    className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors border border-slate-100 dark:border-slate-800"
+                    title="View Details"
+                  >
+                    <Info className="w-4 h-4" />
+                  </button>
                   <button 
                     onClick={() => setChatUser({ uid: msg.uid, name: msg.displayName })}
                     className="flex items-center gap-1 px-3 py-1 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded-lg text-[10px] font-bold hover:bg-blue-100 transition-colors"
@@ -1195,6 +1215,87 @@ export const SystemAdminDashboard: React.FC = () => {
                 <div className="h-[400px] bg-slate-50 dark:bg-slate-800 rounded-3xl overflow-hidden">
                   <Chat receiverId={chatUser.uid} receiverName={chatUser.name} />
                 </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {selectedUserForDetails && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm" onClick={() => setSelectedUserForDetails(null)} />
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0, y: 20 }} 
+              animate={{ scale: 1, opacity: 1, y: 0 }} 
+              className="relative bg-white dark:bg-slate-900 w-full max-w-xl rounded-[2.5rem] shadow-2xl overflow-hidden"
+            >
+              <div className="flex justify-between items-center p-8 border-b border-slate-100 dark:border-slate-800">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900/30 rounded-2xl flex items-center justify-center text-blue-600">
+                    {selectedUserForDetails.displayName?.[0] || 'U'}
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-black text-slate-900 dark:text-white uppercase tracking-tight">{selectedUserForDetails.displayName || 'User Details'}</h3>
+                    <p className="text-sm text-slate-500">{selectedUserForDetails.email}</p>
+                  </div>
+                </div>
+                <button onClick={() => setSelectedUserForDetails(null)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors"><X /></button>
+              </div>
+              <div className="p-8 space-y-6 max-h-[60vh] overflow-y-auto">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl">
+                    <div className="text-[10px] font-black uppercase text-slate-400 mb-1">Requested Role</div>
+                    <div className="font-bold text-slate-900 dark:text-white capitalize">{selectedUserForDetails.requestedRole || 'None'}</div>
+                  </div>
+                  <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl">
+                    <div className="text-[10px] font-black uppercase text-slate-400 mb-1">Status</div>
+                    <div className="font-bold text-slate-900 dark:text-white capitalize">{selectedUserForDetails.status}</div>
+                  </div>
+                </div>
+                {selectedUserForDetails.registrationMessage && (
+                  <div>
+                    <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Registration Message</h4>
+                    <div className="p-6 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-[2rem] text-slate-600 dark:text-slate-300 leading-relaxed italic">
+                      "{selectedUserForDetails.registrationMessage}"
+                    </div>
+                  </div>
+                )}
+                {selectedUserForDetails.fileUrl && (
+                  <div>
+                    <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Attached Document</h4>
+                    <a 
+                      href={selectedUserForDetails.fileUrl} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="flex items-center justify-between p-4 bg-blue-50 dark:bg-blue-900/10 text-blue-600 dark:text-blue-400 rounded-2xl border border-blue-100 dark:border-blue-900/20 hover:bg-blue-100 transition-colors"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-white dark:bg-slate-900 rounded-xl flex items-center justify-center">
+                          <FileText className="w-5 h-5" />
+                        </div>
+                        <span className="font-bold">View Document</span>
+                      </div>
+                      <FileText className="w-4 h-4" />
+                    </a>
+                  </div>
+                )}
+              </div>
+              <div className="p-8 bg-slate-50 dark:bg-slate-800/50 flex gap-4">
+                <button 
+                  onClick={() => {
+                    approveUser(selectedUserForDetails.uid);
+                    setSelectedUserForDetails(null);
+                  }}
+                  className="flex-1 py-4 bg-emerald-600 text-white rounded-2xl font-black text-sm uppercase tracking-widest shadow-xl shadow-emerald-200 dark:shadow-none"
+                >
+                  Approve User
+                </button>
+                <button 
+                  onClick={() => setSelectedUserForDetails(null)}
+                  className="px-8 py-4 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-2xl font-black text-sm uppercase tracking-widest border border-slate-100 dark:border-slate-700"
+                >
+                  Close
+                </button>
               </div>
             </motion.div>
           </div>

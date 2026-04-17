@@ -29,9 +29,10 @@ interface VisitorMessage {
 
 export const SchoolAdminDashboard: React.FC = () => {
   const { user, profile } = useAuth();
-  const [activeTab, setActiveTab] = useState<'announcements' | 'staff' | 'students' | 'requests' | 'messenger' | 'feedback' | 'submissions'>('announcements');
+  const [activeTab, setActiveTab] = useState<'announcements' | 'staff' | 'students' | 'requests' | 'messenger' | 'feedback' | 'submissions' | 'schedules'>('announcements');
   const [selectedContactForFeedback, setSelectedContactForFeedback] = useState<{ uid: string, name: string } | null>(null);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [schedules, setSchedules] = useState<any[]>([]);
   const [staff, setStaff] = useState<UserProfile[]>([]);
   const [parents, setParents] = useState<UserProfile[]>([]);
   const [students, setStudents] = useState<any[]>([]);
@@ -40,8 +41,16 @@ export const SchoolAdminDashboard: React.FC = () => {
   const [selectedContact, setSelectedContact] = useState<UserProfile | null>(null);
   const [newTitle, setNewTitle] = useState('');
   const [newContent, setNewContent] = useState('');
+  const [newDeadline, setNewDeadline] = useState('');
   const [isAdding, setIsAdding] = useState(false);
   const [isAddingTeacher, setIsAddingTeacher] = useState(false);
+  const [isAddingSchedule, setIsAddingSchedule] = useState(false);
+  const [newScheduleDay, setNewScheduleDay] = useState('Monday');
+  const [newScheduleStart, setNewScheduleStart] = useState('');
+  const [newScheduleEnd, setNewScheduleEnd] = useState('');
+  const [newScheduleSubject, setNewScheduleSubject] = useState('');
+  const [newScheduleTeacher, setNewScheduleTeacher] = useState('');
+  const [newScheduleGrade, setNewScheduleGrade] = useState('');
   const [teacherEmail, setTeacherEmail] = useState('');
   const [addTeacherStatus, setAddTeacherStatus] = useState<{ type: 'success' | 'error', message: string } | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -129,6 +138,16 @@ export const SchoolAdminDashboard: React.FC = () => {
       handleFirestoreError(error, OperationType.LIST, 'homework_submissions', user || undefined);
     });
 
+    const schQ = query(
+      collection(db, 'schedules'),
+      where('schoolId', '==', profile.schoolId)
+    );
+    const unsubscribeSch = onSnapshot(schQ, (snapshot) => {
+      setSchedules(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'schedules', user || undefined);
+    });
+
     return () => {
       unsubscribeAnn();
       unsubscribeStaff();
@@ -136,8 +155,58 @@ export const SchoolAdminDashboard: React.FC = () => {
       unsubscribeParents();
       unsubscribeStudents();
       unsubscribeSub();
+      unsubscribeSch();
     };
   }, [profile?.schoolId]);
+
+  // Self-Cleaning Logic for Expired Content
+  useEffect(() => {
+    if (!profile?.schoolId) return;
+    
+    const cleanupExpired = async () => {
+      const now = new Date();
+      
+      // Clean up announcements
+      announcements.forEach(async (ann) => {
+        if (ann.deadline) {
+          const deadlineDate = (ann.deadline as any).toDate ? (ann.deadline as any).toDate() : new Date(ann.deadline);
+          if (deadlineDate < now) {
+            try {
+              await deleteDoc(doc(db, 'announcements', ann.id));
+              console.log(`Deleted expired announcement: ${ann.id}`);
+            } catch (e) {
+              console.error(`Error deleting expired announcement ${ann.id}:`, e);
+            }
+          }
+        }
+      });
+
+      // Clean up assignments
+      // We need to fetch assignments first as they aren't in state yet for admin
+      try {
+        const assignQ = query(
+          collection(db, 'assignments'),
+          where('schoolId', '==', profile.schoolId)
+        );
+        const assignSnap = await getDocs(assignQ);
+        assignSnap.docs.forEach(async (d) => {
+          const data = d.data();
+          if (data.deadline) {
+            const deadlineDate = data.deadline.toDate ? data.deadline.toDate() : new Date(data.deadline);
+            if (deadlineDate < now) {
+              await deleteDoc(d.ref);
+              console.log(`Deleted expired assignment: ${d.id}`);
+            }
+          }
+        });
+      } catch (e) {
+        console.error("Error cleaning up assignments:", e);
+      }
+    };
+
+    // Run cleanup periodically or on mount
+    cleanupExpired();
+  }, [announcements.length, profile?.schoolId]);
 
   const deleteUser = async (uid: string) => {
     if (uid === user?.uid) {
@@ -210,6 +279,39 @@ export const SchoolAdminDashboard: React.FC = () => {
     }
   };
 
+  const handleAddSchedule = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!profile?.schoolId) return;
+    try {
+      await addDoc(collection(db, 'schedules'), {
+        schoolId: profile.schoolId,
+        day: newScheduleDay,
+        startTime: newScheduleStart,
+        endTime: newScheduleEnd,
+        subject: newScheduleSubject,
+        teacherName: newScheduleTeacher,
+        grade: newScheduleGrade,
+        updatedAt: serverTimestamp()
+      });
+      setNewScheduleStart('');
+      setNewScheduleEnd('');
+      setNewScheduleSubject('');
+      setNewScheduleTeacher('');
+      setIsAddingSchedule(false);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'schedules', user || undefined);
+    }
+  };
+
+  const handleDeleteSchedule = async (id: string) => {
+    if (!window.confirm('Delete this schedule?')) return;
+    try {
+      await deleteDoc(doc(db, 'schedules', id));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `schedules/${id}`, user || undefined);
+    }
+  };
+
   const handleAssignTeacher = async (studentId: string, teacherId: string) => {
     try {
       await updateDoc(doc(db, 'students', studentId), {
@@ -277,10 +379,12 @@ export const SchoolAdminDashboard: React.FC = () => {
         fileName,
         fileUrl,
         authorId: profile.uid,
-        createdAt: serverTimestamp()
+        createdAt: serverTimestamp(),
+        deadline: newDeadline ? new Date(newDeadline) : null
       });
       setNewTitle('');
       setNewContent('');
+      setNewDeadline('');
       setSelectedFile(null);
       setIsAdding(false);
     } catch (error) {
@@ -446,6 +550,15 @@ export const SchoolAdminDashboard: React.FC = () => {
           )}
           {activeTab === 'messenger' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
         </button>
+        <button 
+          onClick={() => setActiveTab('schedules')}
+          className={`pb-4 px-2 text-sm font-bold transition-all relative shrink-0 ${
+            activeTab === 'schedules' ? 'text-blue-600' : 'text-slate-400'
+          }`}
+        >
+          Schedules
+          {activeTab === 'schedules' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
+        </button>
       </div>
 
       {activeTab === 'announcements' ? (
@@ -478,13 +591,24 @@ export const SchoolAdminDashboard: React.FC = () => {
                 onChange={(e) => setNewContent(e.target.value)}
                 required
               />
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-slate-500 uppercase px-1">Attach File (Optional)</label>
-                <input 
-                  type="file" 
-                  onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
-                  className="w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-bold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
-                />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-500 uppercase px-1">Attach File (Optional)</label>
+                  <input 
+                    type="file" 
+                    onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+                    className="w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-bold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-500 uppercase px-1">Auto-Delete Deadline</label>
+                  <input 
+                    type="datetime-local" 
+                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
+                    value={newDeadline}
+                    onChange={(e) => setNewDeadline(e.target.value)}
+                  />
+                </div>
               </div>
               <div className="flex justify-end gap-3">
                 <button 
@@ -508,26 +632,39 @@ export const SchoolAdminDashboard: React.FC = () => {
 
           <div className="space-y-4">
             {announcements.map((ann) => (
-              <div key={ann.id} className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm">
-                <h3 className="font-bold text-slate-900 dark:text-white mb-2">{ann.title}</h3>
-                <p className="text-slate-600 dark:text-slate-400 text-sm leading-relaxed mb-4">{ann.content}</p>
+              <div key={ann.id} className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 shadow-sm space-y-4">
+                <div className="flex justify-between items-start gap-4">
+                  <h3 className="font-black text-xl text-slate-900 dark:text-white leading-tight">{ann.title}</h3>
+                  <div className="flex items-center gap-2 text-[10px] text-slate-400 dark:text-slate-500 uppercase font-black">
+                    <Calendar className="w-3 h-3 text-blue-600" />
+                    {ann.createdAt?.toDate().toLocaleDateString()}
+                  </div>
+                </div>
+                
+                <p className="text-slate-600 dark:text-slate-400 text-sm leading-relaxed">{ann.content}</p>
+                
+                {ann.deadline && (
+                  <div className="flex items-center gap-2 p-3 bg-red-50 dark:bg-red-900/10 rounded-2xl border border-red-100 dark:border-red-900/20 text-red-600 dark:text-red-400 text-[10px] font-black uppercase">
+                    <Clock className="w-4 h-4" />
+                    Auto-Deletes At: {ann.deadline.toDate().toLocaleString()}
+                  </div>
+                )}
+
                 {ann.fileUrl && (
-                  <div className="mb-4">
+                  <div className="pt-2">
                     <a 
                       href={ann.fileUrl} 
                       target="_blank" 
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-2 p-2 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded-xl text-xs font-bold hover:underline"
+                      className="inline-flex items-center gap-3 p-4 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded-2xl text-xs font-black uppercase hover:bg-blue-100 transition-all border border-blue-100 dark:border-blue-800 shadow-sm"
                     >
-                      <FileText className="w-4 h-4" />
+                      <div className="p-2 bg-white dark:bg-slate-900 rounded-lg shadow-sm">
+                        <FileText className="w-5 h-5 text-blue-600" />
+                      </div>
                       {ann.fileName || 'View Attachment'}
                     </a>
                   </div>
                 )}
-                <div className="flex items-center gap-2 text-xs text-slate-400 dark:text-slate-500">
-                  <Calendar className="w-3 h-3" />
-                  {ann.createdAt?.toDate().toLocaleDateString()}
-                </div>
               </div>
             ))}
             {announcements.length === 0 && !isAdding && (
@@ -841,7 +978,15 @@ export const SchoolAdminDashboard: React.FC = () => {
                     <td className="p-4 text-xs text-slate-500">{sub.submittedAt?.toDate()?.toLocaleString() || 'Pending...'}</td>
                     <td className="p-4 text-right">
                       {sub.fileUrl && (
-                        <a href={sub.fileUrl} target="_blank" rel="noreferrer" className="text-blue-600 font-bold text-xs hover:underline">View File</a>
+                        <a 
+                          href={sub.fileUrl} 
+                          target="_blank" 
+                          rel="noopener noreferrer" 
+                          className="inline-flex items-center gap-2 px-3 py-1.5 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 font-black text-[10px] uppercase rounded-lg hover:bg-blue-100 transition-all border border-blue-100 dark:border-blue-800"
+                        >
+                          <FileText className="w-3 h-3" />
+                          View File
+                        </a>
                       )}
                     </td>
                   </tr>
@@ -920,6 +1065,156 @@ export const SchoolAdminDashboard: React.FC = () => {
           {requests.length === 0 && (
             <div className="text-center py-20 text-slate-400 italic">No access requests for this school.</div>
           )}
+        </div>
+      ) : activeTab === 'schedules' ? (
+        <div className="space-y-6">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-slate-900 dark:text-white font-bold text-xl">
+              <Calendar className="w-6 h-6 text-blue-600" />
+              Manage School Schedules
+            </div>
+            <button 
+              onClick={() => setIsAddingSchedule(!isAddingSchedule)}
+              className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold flex items-center gap-2 shadow-lg shadow-blue-100"
+            >
+              {isAddingSchedule ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+              {isAddingSchedule ? 'Close Form' : 'Add New Schedule Entry'}
+            </button>
+          </div>
+
+          <AnimatePresence>
+            {isAddingSchedule && (
+              <motion.form 
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                onSubmit={handleAddSchedule}
+                className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-blue-100 dark:border-slate-800 shadow-lg space-y-4 overflow-hidden"
+              >
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Day</label>
+                    <select 
+                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
+                      value={newScheduleDay}
+                      onChange={(e) => setNewScheduleDay(e.target.value)}
+                    >
+                      {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map(d => (
+                        <option key={d} value={d}>{d}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Start Time</label>
+                    <input 
+                      type="time" 
+                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
+                      value={newScheduleStart}
+                      onChange={(e) => setNewScheduleStart(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">End Time</label>
+                    <input 
+                      type="time" 
+                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
+                      value={newScheduleEnd}
+                      onChange={(e) => setNewScheduleEnd(e.target.value)}
+                      required
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Subject</label>
+                    <input 
+                      type="text" 
+                      placeholder="e.g. Mathematics"
+                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
+                      value={newScheduleSubject}
+                      onChange={(e) => setNewScheduleSubject(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Teacher</label>
+                    <input 
+                      type="text" 
+                      placeholder="Teacher's Name"
+                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
+                      value={newScheduleTeacher}
+                      onChange={(e) => setNewScheduleTeacher(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Grade/Level</label>
+                    <input 
+                      type="text" 
+                      placeholder="e.g. 5th Grade"
+                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
+                      value={newScheduleGrade}
+                      onChange={(e) => setNewScheduleGrade(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="flex justify-end gap-3 pt-2">
+                  <button 
+                    type="submit"
+                    className="px-8 py-3 bg-blue-600 text-white rounded-xl font-bold shadow-lg shadow-blue-200"
+                  >
+                    Save Schedule Entry
+                  </button>
+                </div>
+              </motion.form>
+            )}
+          </AnimatePresence>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map(day => {
+              const daySchedules = schedules.filter(s => s.day === day).sort((a,b) => a.startTime.localeCompare(b.startTime));
+              if (daySchedules.length === 0) return null;
+              return (
+                <div key={day} className="bg-white dark:bg-slate-900 p-6 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 shadow-sm overflow-hidden">
+                  <div className="flex items-center gap-2 mb-4 border-b border-slate-50 dark:border-slate-800 pb-3">
+                    <div className="w-2 h-6 bg-blue-600 rounded-full" />
+                    <h3 className="font-black text-lg text-slate-900 dark:text-white uppercase tracking-tighter">{day}</h3>
+                  </div>
+                  <div className="space-y-4">
+                    {daySchedules.map((sch) => (
+                      <div key={sch.id} className="group relative bg-slate-50 dark:bg-slate-800/50 p-4 rounded-2xl border border-transparent hover:border-blue-200 transition-all">
+                        <div className="flex justify-between items-start mb-2">
+                          <span className="text-xs font-black text-blue-600 bg-blue-50 dark:bg-blue-900/40 px-2 py-0.5 rounded-lg">
+                            {sch.startTime} - {sch.endTime}
+                          </span>
+                          <button 
+                            onClick={() => handleDeleteSchedule(sch.id)}
+                            className="opacity-0 group-hover:opacity-100 p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-all"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                        <h4 className="font-bold text-slate-900 dark:text-white">{sch.subject}</h4>
+                        <div className="flex items-center gap-3 mt-1 text-[10px] text-slate-500">
+                          <span className="flex items-center gap-1">
+                            <Users className="w-3 h-3" /> {sch.teacherName || 'TBD'}
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <GraduationCap className="w-3 h-3" /> {sch.grade || 'All'}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+            {schedules.length === 0 && (
+              <div className="col-span-full py-20 text-center text-slate-400 italic bg-slate-50 dark:bg-slate-800/30 rounded-[3rem] border-2 border-dashed border-slate-200 dark:border-slate-800">
+                No schedules configured yet. Use the button above to start adding timetable entries.
+              </div>
+            )}
+          </div>
         </div>
       ) : null}
       <FeedbackModal 

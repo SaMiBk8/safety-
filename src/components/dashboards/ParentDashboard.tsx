@@ -5,7 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import { Student, Announcement, SOSAlert, UserProfile } from '../../types';
 import { GoogleMap, useJsApiLoader, Marker } from '@react-google-maps/api';
 import { motion, AnimatePresence } from 'motion/react';
-import { MapPin, Bell, Phone, ShieldAlert, BookOpen, Calendar, X, MessageSquare, Plus } from 'lucide-react';
+import { MapPin, Bell, Phone, ShieldAlert, BookOpen, Calendar, X, MessageSquare, Plus, Info } from 'lucide-react';
 import { handleFirestoreError, OperationType } from '../../lib/firestore-errors';
 
 const mapContainerStyle = { width: '100%', height: '300px' };
@@ -22,6 +22,7 @@ export const ParentDashboard: React.FC<{ onStartCall?: (channel: string, receive
   const { user, profile } = useAuth();
   const [children, setChildren] = useState<Student[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [schedules, setSchedules] = useState<any[]>([]);
   const [activeAlerts, setActiveAlerts] = useState<SOSAlert[]>([]);
   const [activeModal, setActiveModal] = useState<'messenger' | 'feedback' | 'link-child' | null>(null);
   const [selectedChildForFeedback, setSelectedChildForFeedback] = useState<{ uid: string, name: string } | null>(null);
@@ -30,6 +31,7 @@ export const ParentDashboard: React.FC<{ onStartCall?: (channel: string, receive
   const [childEmail, setChildEmail] = useState('');
   const [addChildStatus, setAddChildStatus] = useState<{ type: 'success' | 'error', message: string } | null>(null);
   const [selectedContact, setSelectedContact] = useState<{ uid: string, displayName: string } | null>(null);
+  const [selectedAnnouncement, setSelectedAnnouncement] = useState<Announcement | null>(null);
   const [unreadTotal, setUnreadTotal] = useState(0);
   const [lastKnownLocations, setLastKnownLocations] = useState<Record<string, { lat: number, lng: number }>>({});
 
@@ -147,7 +149,18 @@ export const ParentDashboard: React.FC<{ onStartCall?: (channel: string, receive
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'announcements', user || undefined);
     });
-    return () => unsubscribe();
+
+    const schQ = query(collection(db, 'schedules'), where('schoolId', 'in', schoolIds));
+    const unsubscribeSch = onSnapshot(schQ, (snapshot) => {
+      setSchedules(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'schedules', user || undefined);
+    });
+
+    return () => {
+      unsubscribe();
+      unsubscribeSch();
+    };
   }, [children]);
 
   const resolveAlert = async (alertId: string) => {
@@ -426,9 +439,13 @@ export const ParentDashboard: React.FC<{ onStartCall?: (channel: string, receive
                   initial={{ opacity: 0, x: 20 }}
                   animate={{ opacity: 1, x: 0 }}
                   key={ann.id} 
-                  className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-sm"
+                  className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-sm cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group"
+                  onClick={() => setSelectedAnnouncement(ann)}
                 >
-                  <h4 className="font-bold text-sm text-slate-900 dark:text-white">{ann.title}</h4>
+                  <div className="flex justify-between items-start gap-2">
+                    <h4 className="font-bold text-sm text-slate-900 dark:text-white group-hover:text-blue-600 transition-colors">{ann.title}</h4>
+                    <Info className="w-4 h-4 text-slate-300 group-hover:text-blue-600 transition-colors shrink-0" />
+                  </div>
                   <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2 mt-1">{ann.content}</p>
                   <div className="mt-2 text-[10px] text-slate-400 dark:text-slate-500 flex items-center gap-1">
                     <Calendar className="w-3 h-3" />
@@ -436,6 +453,45 @@ export const ParentDashboard: React.FC<{ onStartCall?: (channel: string, receive
                   </div>
                 </motion.div>
               ))}
+            </div>
+          </section>
+
+          {/* Student Schedules */}
+          <section className="space-y-4">
+            <div className="flex items-center gap-2 font-bold text-slate-900 dark:text-white">
+              <Calendar className="w-5 h-5 text-indigo-500" />
+              Class Timetables
+            </div>
+            <div className="space-y-4 text-xs">
+              {children.map(child => {
+                const childSchedules = schedules.filter(s => s.schoolId === child.schoolId && (s.grade === child.grade || !s.grade));
+                if (childSchedules.length === 0) return null;
+                return (
+                  <div key={child.id} className="bg-white dark:bg-slate-900 p-5 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm">
+                    <h4 className="font-black text-slate-400 uppercase tracking-widest mb-3 flex items-center justify-between">
+                      {child.name}'s Schedule
+                      <span className="text-[10px] bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 px-2 py-0.5 rounded-full">Grade {child.grade}</span>
+                    </h4>
+                    <div className="space-y-3">
+                       {childSchedules.slice(0, 4).sort((a,b) => a.startTime.localeCompare(b.startTime)).map(sch => (
+                         <div key={sch.id} className="flex justify-between items-center p-2 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl transition-colors">
+                           <div>
+                             <div className="font-bold text-slate-800 dark:text-slate-200">{sch.subject}</div>
+                             <div className="text-[10px] text-slate-500">{sch.teacherName || 'Teacher'}</div>
+                           </div>
+                           <span className="font-black text-indigo-600 bg-indigo-50 dark:bg-indigo-900/30 px-2 py-1 rounded-lg">
+                             {sch.startTime}
+                           </span>
+                         </div>
+                       ))}
+                       {childSchedules.length === 0 && <p className="italic text-slate-400">No schedule available.</p>}
+                    </div>
+                  </div>
+                );
+              })}
+              {children.every(c => schedules.filter(s => s.schoolId === c.schoolId).length === 0) && (
+                 <div className="p-8 text-center text-slate-400 italic">No schedules posted by the school yet.</div>
+              )}
             </div>
           </section>
 
@@ -475,8 +531,48 @@ export const ParentDashboard: React.FC<{ onStartCall?: (channel: string, receive
         </div>
       </div>
 
-      {/* Messenger Modal */}
       <AnimatePresence>
+        {selectedAnnouncement && (
+          <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm" onClick={() => setSelectedAnnouncement(null)} />
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              className="relative bg-white dark:bg-slate-900 w-full max-w-lg rounded-[2.5rem] shadow-2xl overflow-hidden"
+            >
+              <div className="bg-blue-600 p-8 text-white flex justify-between items-center">
+                <div className="flex items-center gap-3">
+                  <Bell className="w-6 h-6" />
+                  <h3 className="text-xl font-black uppercase tracking-tight">Announcement</h3>
+                </div>
+                <button onClick={() => setSelectedAnnouncement(null)} className="p-2 hover:bg-white/20 rounded-xl transition-all"><X /></button>
+              </div>
+              <div className="p-8 space-y-6">
+                <div>
+                  <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Title</h4>
+                  <div className="text-lg font-black text-slate-900 dark:text-white uppercase">{selectedAnnouncement.title}</div>
+                </div>
+                <div>
+                  <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Content</h4>
+                  <div className="p-6 bg-slate-50 dark:bg-slate-800 rounded-3xl border border-slate-100 dark:border-slate-800 text-slate-600 dark:text-slate-300 leading-relaxed font-medium">
+                    {selectedAnnouncement.content}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                  <Calendar className="w-3 h-3" />
+                  Posted on {selectedAnnouncement.createdAt?.toDate().toLocaleString()}
+                </div>
+                <button 
+                  onClick={() => setSelectedAnnouncement(null)}
+                  className="w-full py-4 bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-2xl font-black uppercase tracking-widest shadow-xl"
+                >
+                  Close
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
         {activeModal === 'messenger' && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
             <motion.div 
