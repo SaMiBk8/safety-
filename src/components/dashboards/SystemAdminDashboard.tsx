@@ -386,7 +386,7 @@ export const SystemAdminDashboard: React.FC = () => {
         </div>
       </header>
 
-      <div className="flex gap-4 border-b border-slate-100 dark:border-slate-800 overflow-x-auto whitespace-nowrap pb-px scrollbar-hide">
+      <div className="flex gap-4 border-b border-slate-100 dark:border-slate-800 overflow-x-auto whitespace-nowrap pb-px scrollbar-hide -mx-4 px-4 sm:mx-0 sm:px-0">
         <button 
           onClick={() => setActiveTab('users')}
           className={`pb-4 px-2 text-sm font-bold transition-all relative shrink-0 ${
@@ -490,8 +490,8 @@ export const SystemAdminDashboard: React.FC = () => {
             />
           </div>
 
-          <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-800 overflow-hidden">
-            <table className="w-full text-left border-collapse">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-800 overflow-x-auto scrollbar-hide">
+            <table className="w-full text-left border-collapse min-w-[900px]">
               <thead>
                 <tr className="bg-slate-50 dark:bg-slate-800/50 border-bottom border-slate-100 dark:border-slate-800">
                   <th className="p-4 w-10">
@@ -584,7 +584,7 @@ export const SystemAdminDashboard: React.FC = () => {
                         </button>
                         <button 
                           onClick={() => deleteUser(user.uid)}
-                          className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                          className="p-2.5 text-red-600 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 hover:border-red-300 dark:hover:border-red-900 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-2xl transition-all active:scale-95 shadow-sm flex items-center justify-center translate-z-0"
                           title="Delete Account"
                         >
                           <Trash2 className="w-5 h-5" />
@@ -1022,9 +1022,10 @@ export const SystemAdminDashboard: React.FC = () => {
                   </div>
                   <button 
                     onClick={() => deleteSchool(school.id)}
-                    className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                    className="p-2.5 text-red-600 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 hover:border-red-300 dark:hover:border-red-900 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-2xl transition-all active:scale-95 shadow-sm flex items-center justify-center shrink-0"
+                    title="Delete School"
                   >
-                    <X className="w-4 h-4" />
+                    <Trash2 className="w-5 h-5" />
                   </button>
                 </div>
               );

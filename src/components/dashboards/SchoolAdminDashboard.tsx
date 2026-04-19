@@ -525,7 +525,7 @@ export const SchoolAdminDashboard: React.FC = () => {
         </div>
       </header>
 
-      <div className="flex gap-6 border-b border-slate-100 dark:border-slate-800 mb-8 overflow-x-auto whitespace-nowrap pb-px scrollbar-hide">
+      <div className="flex gap-6 border-b border-slate-100 dark:border-slate-800 mb-8 overflow-x-auto whitespace-nowrap pb-px scrollbar-hide -mx-4 px-4 sm:mx-0 sm:px-0">
         <button 
           onClick={() => setActiveTab('announcements')}
           className={`pb-4 px-2 text-sm font-bold transition-all relative shrink-0 ${
@@ -842,7 +842,7 @@ export const SchoolAdminDashboard: React.FC = () => {
                       <button 
                         type="button"
                         onClick={() => deleteUser(member.uid)}
-                        className="p-2.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-2xl transition-all border border-slate-100 hover:border-red-200 dark:border-slate-800"
+                        className="p-3 text-red-600 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 hover:border-red-300 dark:hover:border-red-900 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-2xl transition-all active:scale-95 shadow-sm flex items-center justify-center"
                         title="Delete Staff Member"
                       >
                         <Trash2 className="w-5 h-5" />
@@ -893,7 +893,7 @@ export const SchoolAdminDashboard: React.FC = () => {
                         <button 
                           type="button"
                           onClick={() => deleteUser(parent.uid)}
-                          className="p-2.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-2xl transition-all border border-slate-100 hover:border-red-200 dark:border-slate-800"
+                          className="p-3 text-red-600 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 hover:border-red-300 dark:hover:border-red-900 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-2xl transition-all active:scale-95 shadow-sm flex items-center justify-center"
                           title="Delete Parent"
                         >
                           <Trash2 className="w-5 h-5" />
@@ -931,8 +931,8 @@ export const SchoolAdminDashboard: React.FC = () => {
             </div>
           </div>
 
-          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm overflow-hidden">
-            <table className="w-full text-left border-collapse">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm overflow-x-auto scrollbar-hide">
+            <table className="w-full text-left border-collapse min-w-[700px]">
               <thead>
                 <tr className="bg-slate-50 dark:bg-slate-800/50">
                   <th className="p-4 text-xs font-black text-slate-400 uppercase tracking-widest">Student Name</th>
@@ -1006,7 +1006,7 @@ export const SchoolAdminDashboard: React.FC = () => {
                         <button 
                           type="button"
                           onClick={() => deleteStudent(student.id)}
-                          className="p-2.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-2xl transition-all border border-slate-100 hover:border-red-200 dark:border-slate-800"
+                          className="p-3 text-red-600 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 hover:border-red-300 dark:hover:border-red-900 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-2xl transition-all active:scale-95 shadow-sm flex items-center justify-center"
                           title="Delete Student Record"
                         >
                           <Trash2 className="w-5 h-5" />
@@ -1037,8 +1037,8 @@ export const SchoolAdminDashboard: React.FC = () => {
           </div>
         </div>
       ) : activeTab === 'submissions' ? (
-        <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm overflow-hidden">
-          <table className="w-full text-left border-collapse">
+        <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm overflow-x-auto scrollbar-hide">
+          <table className="w-full text-left border-collapse min-w-[700px]">
             <thead>
               <tr className="bg-slate-50 dark:bg-slate-800/50 border-bottom border-slate-100 dark:border-slate-800">
                 <th className="p-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Student</th>
@@ -1075,10 +1075,10 @@ export const SchoolAdminDashboard: React.FC = () => {
                         )}
                         <button 
                           onClick={() => deleteSubmission(sub.id)}
-                          className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-colors"
+                          className="p-2.5 text-red-600 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 hover:border-red-300 dark:hover:border-red-900 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-2xl transition-all active:scale-95 shadow-sm flex items-center justify-center"
                           title="Delete Submission"
                         >
-                          <Trash2 className="w-4 h-4" />
+                          <Trash2 className="w-5 h-5" />
                         </button>
                       </div>
                     </td>
@@ -1297,10 +1297,10 @@ export const SchoolAdminDashboard: React.FC = () => {
                           <button 
                             type="button"
                             onClick={() => handleDeleteSchedule(sch.id)}
-                            className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-xl transition-all shadow-sm border border-slate-200 hover:border-red-300 dark:border-slate-700 dark:hover:border-red-900/50"
+                            className="p-3 text-red-600 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 hover:border-red-300 dark:hover:border-red-900 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-2xl transition-all active:scale-95 shadow-sm flex items-center justify-center"
                             title="Delete Schedule Entry"
                           >
-                            <Trash2 className="w-4 h-4" />
+                            <Trash2 className="w-5 h-5" />
                           </button>
                         </div>
                         <h4 className="font-bold text-slate-900 dark:text-white">{sch.subject}</h4>

@@ -21,7 +21,7 @@ import {
   ArrowLeft,
   Info
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
 import { PrivateMessaging } from '../PrivateMessaging';
 import { Chat } from '../Chat';

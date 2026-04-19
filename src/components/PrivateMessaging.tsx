@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { ContactList } from './ContactList';
 import { Chat } from './Chat';
 import { MessageSquare, User, ArrowLeft } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 
 export const PrivateMessaging: React.FC = () => {
   const [selectedContact, setSelectedContact] = useState<{ uid: string; displayName: string } | null>(null);
