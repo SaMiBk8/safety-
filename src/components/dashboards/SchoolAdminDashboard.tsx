@@ -5,7 +5,8 @@ import { db, storage } from '../../lib/firebase';
 import { useAuth } from '../../context/AuthContext';
 import { Announcement, UserProfile } from '../../types';
 import { motion, AnimatePresence } from 'motion/react';
-import { Plus, Megaphone, Users, Calendar, CheckCircle2, X, Clock, FileText, MessageSquare, GraduationCap, Trash2 } from 'lucide-react';
+import { Plus, Megaphone, Users, Calendar, CheckCircle2, X, Clock, FileText, MessageSquare, GraduationCap, Trash2, Info } from 'lucide-react';
+import { toast } from 'sonner';
 import { Chat } from '../Chat';
 import { ContactList } from '../ContactList';
 import { PrivateMessaging } from '../PrivateMessaging';
@@ -50,7 +51,12 @@ export const SchoolAdminDashboard: React.FC = () => {
   const [newScheduleEnd, setNewScheduleEnd] = useState('');
   const [newScheduleSubject, setNewScheduleSubject] = useState('');
   const [newScheduleTeacher, setNewScheduleTeacher] = useState('');
+  const [newScheduleTeacherUid, setNewScheduleTeacherUid] = useState('');
   const [newScheduleGrade, setNewScheduleGrade] = useState('');
+  const [annUploadProgress, setAnnUploadProgress] = useState<number | null>(null);
+
+  const [selectedUserDetail, setSelectedUserDetail] = useState<any>(null);
+  const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [teacherEmail, setTeacherEmail] = useState('');
   const [addTeacherStatus, setAddTeacherStatus] = useState<{ type: 'success' | 'error', message: string } | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -210,13 +216,13 @@ export const SchoolAdminDashboard: React.FC = () => {
 
   const deleteUser = async (uid: string) => {
     if (uid === user?.uid) {
-      alert('You cannot delete your own account.');
+      toast.error('You cannot delete your own account.');
       return;
     }
     if (!window.confirm('Are you sure you want to permanently delete this account? This action cannot be undone.')) return;
     try {
       await deleteDoc(doc(db, 'users', uid));
-      alert('Account successfully deleted.');
+      toast.success('Account successfully deleted.');
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `users/${uid}`, user || undefined);
     }
@@ -226,9 +232,19 @@ export const SchoolAdminDashboard: React.FC = () => {
     if (!window.confirm('Are you sure you want to permanently delete this student record? This action cannot be undone.')) return;
     try {
       await deleteDoc(doc(db, 'students', studentId));
-      alert('Student record successfully deleted.');
+      toast.success('Student record successfully deleted.');
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `students/${studentId}`, user || undefined);
+    }
+  };
+
+  const deleteSubmission = async (id: string) => {
+    if (!window.confirm('Are you sure you want to permanently delete this submission record?')) return;
+    try {
+      await deleteDoc(doc(db, 'homework_submissions', id));
+      toast.success('Submission record deleted.');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `homework_submissions/${id}`, user || undefined);
     }
   };
 
@@ -283,13 +299,15 @@ export const SchoolAdminDashboard: React.FC = () => {
     e.preventDefault();
     if (!profile?.schoolId) return;
     try {
+      const teacher = staff.find(s => s.uid === newScheduleTeacherUid);
       await addDoc(collection(db, 'schedules'), {
         schoolId: profile.schoolId,
         day: newScheduleDay,
         startTime: newScheduleStart,
         endTime: newScheduleEnd,
         subject: newScheduleSubject,
-        teacherName: newScheduleTeacher,
+        teacherName: teacher?.displayName || newScheduleTeacher,
+        teacherUid: newScheduleTeacherUid || null,
         grade: newScheduleGrade,
         updatedAt: serverTimestamp()
       });
@@ -297,18 +315,32 @@ export const SchoolAdminDashboard: React.FC = () => {
       setNewScheduleEnd('');
       setNewScheduleSubject('');
       setNewScheduleTeacher('');
+      setNewScheduleTeacherUid('');
+      setNewScheduleGrade('');
       setIsAddingSchedule(false);
+      toast.success("Schedule entry added!");
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'schedules', user || undefined);
     }
   };
 
   const handleDeleteSchedule = async (id: string) => {
-    if (!window.confirm('Delete this schedule?')) return;
+    if (!window.confirm('Delete this schedule entry?')) return;
     try {
       await deleteDoc(doc(db, 'schedules', id));
+      toast.success("Schedule entry removed.");
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `schedules/${id}`, user || undefined);
+    }
+  };
+
+  const handleDeleteAnnouncement = async (id: string) => {
+    if (!window.confirm('Delete this announcement?')) return;
+    try {
+      await deleteDoc(doc(db, 'announcements', id));
+      toast.success("Announcement deleted.");
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `announcements/${id}`, user || undefined);
     }
   };
 
@@ -339,6 +371,8 @@ export const SchoolAdminDashboard: React.FC = () => {
     if (!profile?.schoolId) return;
 
     setUploading(true);
+    setAnnUploadProgress(0);
+    const toastId = toast.loading("Posting announcement...");
     try {
       let fileUrl = '';
       let fileName = '';
@@ -353,7 +387,8 @@ export const SchoolAdminDashboard: React.FC = () => {
             reject(new Error("Upload timed out after 10 minutes."));
           }, 600000);
 
-          uploadTask.on('state_changed', null, 
+          uploadTask.on('state_changed', 
+            (snap) => setAnnUploadProgress((snap.bytesTransferred / snap.totalBytes) * 100),
             (error: any) => {
               clearTimeout(timeout);
               if (error.code === 'storage/retry-limit-exceeded') {
@@ -387,10 +422,13 @@ export const SchoolAdminDashboard: React.FC = () => {
       setNewDeadline('');
       setSelectedFile(null);
       setIsAdding(false);
-    } catch (error) {
+      toast.success("Announcement posted successfully!", { id: toastId });
+    } catch (error: any) {
+      toast.error(error.message || "Failed to post announcement", { id: toastId });
       handleFirestoreError(error, OperationType.CREATE, 'announcements', user || undefined);
     } finally {
       setUploading(false);
+      setAnnUploadProgress(null);
     }
   };
 
@@ -634,10 +672,21 @@ export const SchoolAdminDashboard: React.FC = () => {
             {announcements.map((ann) => (
               <div key={ann.id} className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 shadow-sm space-y-4">
                 <div className="flex justify-between items-start gap-4">
-                  <h3 className="font-black text-xl text-slate-900 dark:text-white leading-tight">{ann.title}</h3>
-                  <div className="flex items-center gap-2 text-[10px] text-slate-400 dark:text-slate-500 uppercase font-black">
-                    <Calendar className="w-3 h-3 text-blue-600" />
-                    {ann.createdAt?.toDate().toLocaleDateString()}
+                  <div className="flex-1">
+                    <h3 className="font-black text-xl text-slate-900 dark:text-white leading-tight">{ann.title}</h3>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2 text-[10px] text-slate-400 dark:text-slate-500 uppercase font-black">
+                      <Calendar className="w-3 h-3 text-blue-600" />
+                      {ann.createdAt?.toDate().toLocaleDateString()}
+                    </div>
+                    <button 
+                      onClick={() => handleDeleteAnnouncement(ann.id)}
+                      className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-colors"
+                      title="Delete Announcement"
+                    >
+                      <Trash2 className="w-5 h-5" />
+                    </button>
                   </div>
                 </div>
                 
@@ -789,15 +838,25 @@ export const SchoolAdminDashboard: React.FC = () => {
                     <span className={`text-xs font-bold uppercase ${member.status === 'active' ? 'text-emerald-500' : 'text-amber-500'}`}>
                       {member.status}
                     </span>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-3">
                       <button 
+                        type="button"
                         onClick={() => deleteUser(member.uid)}
-                        className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-colors"
+                        className="p-2.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-2xl transition-all border border-slate-100 hover:border-red-200 dark:border-slate-800"
                         title="Delete Staff Member"
                       >
-                        <Trash2 className="w-4 h-4" />
+                        <Trash2 className="w-5 h-5" />
                       </button>
-                      <button className="text-xs font-bold text-blue-600 hover:underline">View Profile</button>
+                      <button 
+                        type="button"
+                        onClick={() => {
+                          setSelectedUserDetail(member);
+                          setIsDetailModalOpen(true);
+                        }}
+                        className="text-xs font-bold text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 px-3 py-1.5 rounded-lg transition-colors"
+                      >
+                        View Profile
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -819,13 +878,27 @@ export const SchoolAdminDashboard: React.FC = () => {
                         <h4 className="font-bold text-slate-900 dark:text-white">{parent.displayName || 'Parent'}</h4>
                         <p className="text-xs text-slate-500">{parent.email}</p>
                       </div>
-                      <button 
-                        onClick={() => deleteUser(parent.uid)}
-                        className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-colors"
-                        title="Delete Parent"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button 
+                          type="button"
+                          onClick={() => {
+                            setSelectedUserDetail(parent);
+                            setIsDetailModalOpen(true);
+                          }}
+                          className="p-2.5 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-2xl transition-all border border-slate-100 hover:border-blue-200 dark:border-slate-800"
+                          title="View Profile"
+                        >
+                          <Info className="w-5 h-5" />
+                        </button>
+                        <button 
+                          type="button"
+                          onClick={() => deleteUser(parent.uid)}
+                          className="p-2.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-2xl transition-all border border-slate-100 hover:border-red-200 dark:border-slate-800"
+                          title="Delete Parent"
+                        >
+                          <Trash2 className="w-5 h-5" />
+                        </button>
+                      </div>
                     </div>
                   <div className="space-y-2 pt-4 border-t border-slate-50 dark:border-slate-800">
                     <div className="text-[10px] font-black text-slate-400 uppercase">Linked Children</div>
@@ -929,15 +1002,25 @@ export const SchoolAdminDashboard: React.FC = () => {
                       </select>
                     </td>
                     <td className="p-4">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-3">
                         <button 
+                          type="button"
                           onClick={() => deleteStudent(student.id)}
-                          className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-colors"
-                          title="Delete Student"
+                          className="p-2.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-2xl transition-all border border-slate-100 hover:border-red-200 dark:border-slate-800"
+                          title="Delete Student Record"
                         >
-                          <Trash2 className="w-4 h-4" />
+                          <Trash2 className="w-5 h-5" />
                         </button>
-                        <button className="text-xs font-bold text-blue-600 hover:underline">View Details</button>
+                        <button 
+                          type="button"
+                          onClick={() => {
+                            setSelectedUserDetail(student);
+                            setIsDetailModalOpen(true);
+                          }}
+                          className="text-xs font-bold text-blue-600 hover:underline"
+                        >
+                          View Details
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -977,17 +1060,27 @@ export const SchoolAdminDashboard: React.FC = () => {
                     <td className="p-4 text-slate-600 dark:text-slate-400">{sub.title}</td>
                     <td className="p-4 text-xs text-slate-500">{sub.submittedAt?.toDate()?.toLocaleString() || 'Pending...'}</td>
                     <td className="p-4 text-right">
-                      {sub.fileUrl && (
-                        <a 
-                          href={sub.fileUrl} 
-                          target="_blank" 
-                          rel="noopener noreferrer" 
-                          className="inline-flex items-center gap-2 px-3 py-1.5 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 font-black text-[10px] uppercase rounded-lg hover:bg-blue-100 transition-all border border-blue-100 dark:border-blue-800"
+                      <div className="flex items-center justify-end gap-2">
+                        {sub.fileUrl && (
+                          <a 
+                            href={sub.fileUrl} 
+                            target="_blank" 
+                            rel="noopener noreferrer" 
+                            referrerPolicy="no-referrer"
+                            className="inline-flex items-center gap-2 px-3 py-1.5 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 font-black text-[10px] uppercase rounded-lg hover:bg-blue-100 transition-all border border-blue-100 dark:border-blue-800"
+                          >
+                            <FileText className="w-3 h-3" />
+                            View File
+                          </a>
+                        )}
+                        <button 
+                          onClick={() => deleteSubmission(sub.id)}
+                          className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-colors"
+                          title="Delete Submission"
                         >
-                          <FileText className="w-3 h-3" />
-                          View File
-                        </a>
-                      )}
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -1027,6 +1120,7 @@ export const SchoolAdminDashboard: React.FC = () => {
                         href={req.fileUrl} 
                         target="_blank" 
                         rel="noreferrer"
+                        referrerPolicy="no-referrer"
                         className="mt-2 flex items-center gap-2 text-xs text-blue-600 font-bold hover:underline"
                       >
                         <FileText className="w-3 h-3" />
@@ -1139,13 +1233,26 @@ export const SchoolAdminDashboard: React.FC = () => {
                   </div>
                   <div className="space-y-1">
                     <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Teacher</label>
-                    <input 
-                      type="text" 
-                      placeholder="Teacher's Name"
+                    <select 
                       className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
-                      value={newScheduleTeacher}
-                      onChange={(e) => setNewScheduleTeacher(e.target.value)}
-                    />
+                      value={newScheduleTeacherUid}
+                      onChange={(e) => setNewScheduleTeacherUid(e.target.value)}
+                    >
+                      <option value="">Select Teacher...</option>
+                      {staff.map(s => (
+                        <option key={s.uid} value={s.uid}>{s.displayName || s.email}</option>
+                      ))}
+                      <option value="custom">Custom Name...</option>
+                    </select>
+                    {newScheduleTeacherUid === 'custom' && (
+                      <input 
+                        type="text" 
+                        placeholder="Custom Teacher's Name"
+                        className="w-full mt-2 px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
+                        value={newScheduleTeacher}
+                        onChange={(e) => setNewScheduleTeacher(e.target.value)}
+                      />
+                    )}
                   </div>
                   <div className="space-y-1">
                     <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Grade/Level</label>
@@ -1188,8 +1295,10 @@ export const SchoolAdminDashboard: React.FC = () => {
                             {sch.startTime} - {sch.endTime}
                           </span>
                           <button 
+                            type="button"
                             onClick={() => handleDeleteSchedule(sch.id)}
-                            className="opacity-0 group-hover:opacity-100 p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-all"
+                            className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-xl transition-all shadow-sm border border-slate-200 hover:border-red-300 dark:border-slate-700 dark:hover:border-red-900/50"
+                            title="Delete Schedule Entry"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -1217,12 +1326,94 @@ export const SchoolAdminDashboard: React.FC = () => {
           </div>
         </div>
       ) : null}
-      <FeedbackModal 
-        isOpen={activeTab === 'feedback'}
-        onClose={() => setActiveTab('messenger')}
-        toUid={selectedContactForFeedback?.uid || ''}
-        toName={selectedContactForFeedback?.name || ''}
-      />
+      <AnimatePresence>
+        {isDetailModalOpen && selectedUserDetail && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsDetailModalOpen(false)}
+              className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="relative bg-white dark:bg-slate-900 w-full max-w-lg rounded-[2.5rem] shadow-2xl overflow-hidden"
+            >
+              <div className="p-8">
+                <div className="flex items-center justify-between mb-8">
+                  <h3 className="text-2xl font-black text-slate-900 dark:text-white capitalize">User Profile Details</h3>
+                  <button onClick={() => setIsDetailModalOpen(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors">
+                    <X className="w-6 h-6 text-slate-400" />
+                  </button>
+                </div>
+                
+                <div className="space-y-6">
+                  <div className="flex items-center gap-6 pb-6 border-b border-slate-100 dark:border-slate-800">
+                    <div className="w-20 h-20 bg-blue-600 rounded-3xl flex items-center justify-center text-white text-3xl font-black">
+                      {selectedUserDetail.name?.[0] || selectedUserDetail.displayName?.[0] || 'U'}
+                    </div>
+                    <div>
+                      <h4 className="text-xl font-black text-slate-900 dark:text-white">
+                        {selectedUserDetail.name || selectedUserDetail.displayName || 'Unknown User'}
+                      </h4>
+                      <p className="text-slate-500 font-bold uppercase tracking-widest text-xs">
+                        {selectedUserDetail.role?.replace('_', ' ') || 'Student'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl">
+                      <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Email</p>
+                      <p className="font-bold text-slate-900 dark:text-white truncate">{selectedUserDetail.email || 'N/A'}</p>
+                    </div>
+                    <div className="p-4 bg-emerald-50 dark:bg-emerald-900/20 rounded-2xl">
+                      <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Status</p>
+                      <p className="font-bold text-emerald-600 dark:text-emerald-400 capitalize">{selectedUserDetail.status || 'Active'}</p>
+                    </div>
+                  </div>
+
+                  {selectedUserDetail.grade && (
+                    <div className="p-4 bg-purple-50 dark:bg-purple-900/20 rounded-2xl">
+                      <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Grade / Level</p>
+                      <p className="font-bold text-purple-600">{selectedUserDetail.grade}</p>
+                    </div>
+                  )}
+
+                  {selectedUserDetail.subject && (
+                    <div className="p-4 bg-orange-50 dark:bg-orange-900/20 rounded-2xl">
+                      <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Specialization / Subject</p>
+                      <p className="font-bold text-orange-600">{selectedUserDetail.subject}</p>
+                    </div>
+                  )}
+
+                  <div className="pt-4 flex gap-3">
+                    <button 
+                      onClick={() => {
+                        setSelectedContact(selectedUserDetail.uid ? selectedUserDetail : { ...selectedUserDetail, uid: selectedUserDetail.id });
+                        setActiveTab('messenger');
+                        setIsDetailModalOpen(false);
+                      }}
+                      className="flex-1 py-4 bg-blue-600 text-white rounded-2xl font-black text-sm uppercase tracking-widest hover:bg-blue-700 transition-all shadow-lg"
+                    >
+                      Send Message
+                    </button>
+                    <button 
+                      onClick={() => setIsDetailModalOpen(false)}
+                      className="px-6 py-4 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-2xl font-black text-sm uppercase tracking-widest hover:bg-slate-200 transition-all"
+                    >
+                      Close
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { collection, query, where, onSnapshot, addDoc, serverTimestamp, getDocs, doc, getDoc, updateDoc, orderBy, arrayUnion } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, addDoc, serverTimestamp, getDocs, doc, getDoc, updateDoc, orderBy, arrayUnion, deleteDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useAuth } from '../../context/AuthContext';
 import { Student, Announcement } from '../../types';
 import { motion, AnimatePresence } from 'motion/react';
-import { Trophy, MessageSquare, Calendar, Users, X, CheckCircle2, Activity, Clock, MapPin, Megaphone, BookOpen, Plus } from 'lucide-react';
+import { Trophy, MessageSquare, Calendar, Users, X, CheckCircle2, Activity, Clock, MapPin, Megaphone, BookOpen, Plus, Trash2, FileText } from 'lucide-react';
+import { toast } from 'sonner';
 import { handleFirestoreError, OperationType } from '../../lib/firestore-errors';
 import { Chat } from '../Chat';
 
@@ -139,7 +140,7 @@ export const SportsCoachDashboard: React.FC = () => {
       });
       setTrainingLog({ exercise: '', duration: '', intensity: 'medium', notes: '' });
       setSelectedStudent(null);
-      alert('Training log updated!');
+      toast.success('Training log updated!');
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'sports_training', user || undefined);
     } finally {
@@ -166,7 +167,7 @@ export const SportsCoachDashboard: React.FC = () => {
       setNewAssignDesc('');
       setNewAssignDueDate('');
       setIsAddingAssignment(false);
-      alert('Assignment created successfully!');
+      toast.success('Assignment created successfully!');
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'assignments', user || undefined);
     }
@@ -191,8 +192,29 @@ export const SportsCoachDashboard: React.FC = () => {
         subject: teacherSubject,
         updatedAt: serverTimestamp()
       });
+      toast.success('Subject updated successfully!');
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `users/${profile.uid}`, user || undefined);
+    }
+  };
+
+  const handleDeleteAssignment = async (id: string) => {
+    if (!window.confirm('Delete this assignment?')) return;
+    try {
+      await deleteDoc(doc(db, 'assignments', id));
+      toast.success('Assignment deleted.');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `assignments/${id}`, user || undefined);
+    }
+  };
+
+  const handleDeleteSubmission = async (id: string) => {
+    if (!window.confirm('Delete this submission?')) return;
+    try {
+      await deleteDoc(doc(db, 'homework_submissions', id));
+      toast.success('Submission deleted.');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `homework_submissions/${id}`, user || undefined);
     }
   };
 
@@ -463,9 +485,27 @@ export const SportsCoachDashboard: React.FC = () => {
                   <td className="p-4 text-slate-600 dark:text-slate-400">{sub.title}</td>
                   <td className="p-4 text-xs text-slate-500">{sub.submittedAt?.toDate()?.toLocaleString() || 'Pending...'}</td>
                   <td className="p-4 text-right">
-                    {sub.fileUrl && (
-                      <a href={sub.fileUrl} target="_blank" rel="noreferrer" className="text-blue-600 font-bold text-xs hover:underline">View File</a>
-                    )}
+                    <div className="flex items-center justify-end gap-2">
+                      {sub.fileUrl && (
+                        <a 
+                          href={sub.fileUrl} 
+                          target="_blank" 
+                          rel="noopener noreferrer" 
+                          referrerPolicy="no-referrer"
+                          className="text-blue-600 font-bold text-xs hover:underline flex items-center gap-1"
+                        >
+                          <FileText className="w-3 h-3" />
+                          View File
+                        </a>
+                      )}
+                      <button 
+                        onClick={() => handleDeleteSubmission(sub.id)}
+                        className="p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-all"
+                        title="Delete Submission"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -542,7 +582,15 @@ export const SportsCoachDashboard: React.FC = () => {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {assignments.map((assign) => (
-              <div key={assign.id} className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm">
+              <div key={assign.id} className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm relative group">
+                <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button 
+                    onClick={() => handleDeleteAssignment(assign.id)}
+                    className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-colors"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
                 <h3 className="font-bold text-slate-900 dark:text-white mb-2">{assign.title}</h3>
                 <p className="text-slate-600 dark:text-slate-400 text-sm leading-relaxed mb-4">{assign.description}</p>
                 <div className="flex items-center justify-between mt-4 pt-4 border-t border-slate-50 dark:border-slate-800">

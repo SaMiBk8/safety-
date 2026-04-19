@@ -6,6 +6,7 @@ import { useAuth } from '../../context/AuthContext';
 import { Student } from '../../types';
 import { motion } from 'motion/react';
 import { Shield, MapPin, Clock, Phone, UserCheck, Calendar, Info, MessageSquare, Send, FileText, X, CheckCircle2 } from 'lucide-react';
+import { toast } from 'sonner';
 import { handleFirestoreError, OperationType } from '../../lib/firestore-errors';
 
 import { Chat } from '../Chat';
@@ -119,7 +120,7 @@ export const AuthorizedPersonDashboard: React.FC = () => {
 
       setMessageToAdmin('');
       setSelectedFile(null);
-      alert('Message and file sent to admin successfully!');
+      toast.success('Message and file sent to admin successfully!');
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'visitor_messages', user || undefined);
     } finally {

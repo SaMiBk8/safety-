@@ -5,6 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import { UserProfile, School } from '../../types';
 import { motion, AnimatePresence } from 'motion/react';
 import { Shield, UserX, UserCheck, Search, MessageSquare, Clock, CheckCircle2, X, FileText, Trash2, Users, Plus, AlertCircle, Info } from 'lucide-react';
+import { toast } from 'sonner';
 import { handleFirestoreError, OperationType } from '../../lib/firestore-errors';
 
 interface VisitorMessage {
@@ -192,7 +193,7 @@ export const SystemAdminDashboard: React.FC = () => {
 
       setShowCleanupConfirm(false);
       setSelectedUserIds([]);
-      alert('All non-admin accounts and visitor requests have been cleared.');
+      toast.success('All non-admin accounts and visitor requests have been cleared.');
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, 'users', user || undefined);
     } finally {
@@ -207,7 +208,7 @@ export const SystemAdminDashboard: React.FC = () => {
       const deletePromises = messagesSnap.docs.map(d => deleteDoc(d.ref));
       await Promise.all(deletePromises);
       setShowCleanupMessagesConfirm(false);
-      alert('All chat messages have been deleted.');
+      toast.success('All chat messages have been deleted.');
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, 'messages', user || undefined);
     } finally {
@@ -220,7 +221,7 @@ export const SystemAdminDashboard: React.FC = () => {
     
     const idsToDelete = selectedUserIds.filter(id => id !== user?.uid);
     if (idsToDelete.length === 0) {
-      alert('You cannot delete your own account.');
+      toast.error('You cannot delete your own account.');
       return;
     }
 
@@ -241,7 +242,7 @@ export const SystemAdminDashboard: React.FC = () => {
       
       console.log('Successfully deleted selected users and their data');
       setSelectedUserIds([]);
-      alert(`Successfully deleted ${idsToDelete.length} accounts and their related data.`);
+      toast.success(`Successfully deleted ${idsToDelete.length} accounts and their related data.`);
     } catch (error) {
       console.error('Delete selected users failed:', error);
       handleFirestoreError(error, OperationType.DELETE, 'users', user || undefined);
@@ -252,7 +253,7 @@ export const SystemAdminDashboard: React.FC = () => {
 
   const deleteUser = async (uid: string) => {
     if (uid === user?.uid) {
-      alert('You cannot delete your own account.');
+      toast.error('You cannot delete your own account.');
       return;
     }
     
@@ -273,7 +274,7 @@ export const SystemAdminDashboard: React.FC = () => {
       await Promise.all(msgDeletes);
 
       console.log('Successfully deleted user and related data:', uid);
-      alert('Account and related data successfully deleted.');
+      toast.success('Account and related data successfully deleted.');
     } catch (error) {
       console.error('Delete user failed:', error);
       handleFirestoreError(error, OperationType.DELETE, `users/${uid}`, user || undefined);
@@ -301,7 +302,7 @@ export const SystemAdminDashboard: React.FC = () => {
       // Find admin user by email
       const adminUser = users.find(u => u.email.toLowerCase() === newSchool.adminEmail.toLowerCase());
       if (!adminUser) {
-        alert('User with this email not found. They must sign up first.');
+        toast.error('User with this email not found. They must sign up first.');
         return;
       }
 
@@ -329,9 +330,10 @@ export const SystemAdminDashboard: React.FC = () => {
   };
 
   const deleteSchool = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this school?')) return;
+    if (!window.confirm('Are you sure you want to delete this school?')) return;
     try {
       await deleteDoc(doc(db, 'schools', id));
+      toast.success('School deleted successfully.');
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `schools/${id}`, user || undefined);
     }
@@ -706,7 +708,7 @@ export const SystemAdminDashboard: React.FC = () => {
                   const cUser = users.find(u => u.email.toLowerCase() === cEmail && u.role === 'child');
 
                   if (!pUser || !cUser) {
-                    alert('Parent or Child not found with these emails and roles.');
+                    toast.error('Parent or Child not found with these emails and roles.');
                     return;
                   }
 
@@ -722,12 +724,12 @@ export const SystemAdminDashboard: React.FC = () => {
 
                   await ensureStudentRecord(cUser.uid, cUser.displayName || cUser.email, cUser.schoolId || '', pUser.uid);
 
-                  alert('Successfully linked parent and child.');
+                  toast.success('Successfully linked parent and child.');
                   (document.getElementById('parentEmail') as HTMLInputElement).value = '';
                   (document.getElementById('childEmail') as HTMLInputElement).value = '';
                 } catch (error) {
                   console.error(error);
-                  alert('Failed to link accounts.');
+                  toast.error('Failed to link accounts.');
                 }
               }}
               className="mt-6 px-8 py-4 bg-blue-600 text-white rounded-2xl font-bold shadow-lg shadow-blue-100 dark:shadow-none hover:bg-blue-700 transition-all"
@@ -811,6 +813,7 @@ export const SystemAdminDashboard: React.FC = () => {
                         href={msg.fileUrl} 
                         target="_blank" 
                         rel="noopener noreferrer"
+                        referrerPolicy="no-referrer"
                         className="text-[10px] font-bold text-blue-600 hover:underline"
                       >
                         {msg.fileName}
@@ -872,6 +875,7 @@ export const SystemAdminDashboard: React.FC = () => {
                   <th className="p-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Rating</th>
                   <th className="p-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Comment</th>
                   <th className="p-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Date</th>
+                  <th className="p-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-right">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
@@ -906,6 +910,25 @@ export const SystemAdminDashboard: React.FC = () => {
                       <div className="text-[10px] text-slate-400">
                         {fb.createdAt?.toDate().toLocaleString()}
                       </div>
+                    </td>
+                    <td className="p-4 text-right">
+                      <button 
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          if (window.confirm('Delete this feedback?')) {
+                            try {
+                              await deleteDoc(doc(db, 'feedback', fb.id));
+                              toast.success('Feedback deleted.');
+                            } catch (err) {
+                              toast.error('Failed to delete.');
+                            }
+                          }
+                        }}
+                        className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-colors"
+                        title="Delete Feedback"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -1267,6 +1290,7 @@ export const SystemAdminDashboard: React.FC = () => {
                       href={selectedUserForDetails.fileUrl} 
                       target="_blank" 
                       rel="noopener noreferrer"
+                      referrerPolicy="no-referrer"
                       className="flex items-center justify-between p-4 bg-blue-50 dark:bg-blue-900/10 text-blue-600 dark:text-blue-400 rounded-2xl border border-blue-100 dark:border-blue-900/20 hover:bg-blue-100 transition-colors"
                     >
                       <div className="flex items-center gap-3">

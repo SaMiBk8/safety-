@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { collection, query, where, onSnapshot, addDoc, serverTimestamp, updateDoc, doc, getDoc, orderBy, arrayUnion } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, addDoc, serverTimestamp, updateDoc, doc, getDoc, orderBy, arrayUnion, deleteDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, uploadBytesResumable } from 'firebase/storage';
 import { db, storage } from '../../lib/firebase';
 import { useAuth } from '../../context/AuthContext';
 import { Student, Announcement } from '../../types';
 import { motion, AnimatePresence } from 'motion/react';
-import { Users, ClipboardCheck, GraduationCap, AlertTriangle, MessageSquare, X, CheckCircle2, AlertCircle, BookOpen, FileText, Clock, Megaphone, Calendar, Plus, Info } from 'lucide-react';
+import { Users, ClipboardCheck, GraduationCap, AlertTriangle, MessageSquare, X, CheckCircle2, AlertCircle, BookOpen, FileText, Clock, Megaphone, Calendar, Plus, Info, Trash2 } from 'lucide-react';
+import { toast } from 'sonner';
 import { handleFirestoreError, OperationType } from '../../lib/firestore-errors';
 import { Chat } from '../Chat';
 import { ContactList } from '../ContactList';
@@ -25,16 +26,14 @@ export const TeacherDashboard: React.FC = () => {
   const [gradeComment, setGradeComment] = useState('');
   const [gradeBehavior, setGradeBehavior] = useState<'excellent' | 'good' | 'average' | 'poor'>('good');
   const [attendanceStatus, setAttendanceStatus] = useState<'present' | 'absent' | null>(null);
+  const [assignUploadProgress, setAssignUploadProgress] = useState<number | null>(null);
+  const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
+  const [selectedUserDetail, setSelectedUserDetail] = useState<any>(null);
   const [parents, setParents] = useState<{ uid: string, name: string, studentName: string }[]>([]);
   const [selectedParent, setSelectedParent] = useState<{ uid: string, name: string } | null>(null);
   const [selectedContact, setSelectedContact] = useState<{ uid: string, displayName: string } | null>(null);
   const [submissions, setSubmissions] = useState<any[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
-  const [isAddingAnnouncement, setIsAddingAnnouncement] = useState(false);
-  const [newAnnTitle, setNewAnnTitle] = useState('');
-  const [newAnnContent, setNewAnnContent] = useState('');
-  const [annFile, setAnnFile] = useState<File | null>(null);
-  const [annUploading, setAnnUploading] = useState(false);
   const [viewMode, setViewMode] = useState<'my' | 'all'>('all');
   const [teacherSubject, setTeacherSubject] = useState(profile?.subject || '');
   const [unreadTotal, setUnreadTotal] = useState(0);
@@ -47,7 +46,6 @@ export const TeacherDashboard: React.FC = () => {
   const [newAssignDeadline, setNewAssignDeadline] = useState('');
   const [assignFile, setAssignFile] = useState<File | null>(null);
   const [isAssignUploading, setIsAssignUploading] = useState(false);
-  const [newAnnDeadline, setNewAnnDeadline] = useState('');
 
   useEffect(() => {
     if (!profile?.uid) return;
@@ -234,68 +232,39 @@ export const TeacherDashboard: React.FC = () => {
         subject: teacherSubject,
         updatedAt: serverTimestamp()
       });
+      toast.success('Subject updated successfully!');
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `users/${profile.uid}`, user || undefined);
     }
   };
 
-  const handleAddAnnouncement = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!profile?.schoolId) return;
-
-    setAnnUploading(true);
+  const handleDeleteAssignment = async (id: string) => {
+    if (!window.confirm('Are you sure you want to delete this assignment?')) return;
     try {
-      let fileUrl = '';
-      let fileName = '';
-
-      if (annFile) {
-        const storageRef = ref(storage, `announcements/${profile.schoolId}/${Date.now()}_${annFile.name}`);
-        const uploadTask = uploadBytesResumable(storageRef, annFile);
-        
-        fileUrl = await new Promise((resolve, reject) => {
-          const timeout = setTimeout(() => {
-            uploadTask.cancel();
-            reject(new Error("Upload timed out after 10 minutes."));
-          }, 600000);
-
-          uploadTask.on('state_changed', null, 
-            (error: any) => {
-              clearTimeout(timeout);
-              if (error.code === 'storage/retry-limit-exceeded') {
-                reject(new Error("Connection lost multiple times. Please check your internet."));
-              } else {
-                reject(error);
-              }
-            }, 
-            async () => {
-              clearTimeout(timeout);
-              const url = await getDownloadURL(uploadTask.snapshot.ref);
-              resolve(url);
-            }
-          );
-        });
-        fileName = annFile.name;
-      }
-
-      await addDoc(collection(db, 'announcements'), {
-        schoolId: profile.schoolId,
-        title: newAnnTitle,
-        content: newAnnContent,
-        fileName,
-        fileUrl,
-        authorId: profile.uid,
-        createdAt: serverTimestamp(),
-        deadline: newAnnDeadline ? new Date(newAnnDeadline) : null
-      });
-      setNewAnnTitle('');
-      setNewAnnContent('');
-      setNewAnnDeadline('');
-      setAnnFile(null);
-      setIsAddingAnnouncement(false);
+      await deleteDoc(doc(db, 'assignments', id));
+      toast.success('Assignment deleted successfully.');
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'announcements', user || undefined);
-    } finally {
-      setAnnUploading(false);
+      handleFirestoreError(error, OperationType.DELETE, `assignments/${id}`, user || undefined);
+    }
+  };
+
+  const handleDeleteSubmission = async (id: string) => {
+    if (!window.confirm('Delete this submission?')) return;
+    try {
+      await deleteDoc(doc(db, 'homework_submissions', id));
+      toast.success('Submission deleted.');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `homework_submissions/${id}`, user || undefined);
+    }
+  };
+
+  const handleDeleteIncident = async (id: string) => {
+    if (!window.confirm('Delete this incident?')) return;
+    try {
+      await deleteDoc(doc(db, 'incidents', id));
+      toast.success('Incident deleted.');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `incidents/${id}`, user || undefined);
     }
   };
 
@@ -304,6 +273,8 @@ export const TeacherDashboard: React.FC = () => {
     if (!profile?.schoolId || !profile?.uid) return;
 
     setIsAssignUploading(true);
+    setAssignUploadProgress(0);
+    const toastId = toast.loading("Creating assignment...");
     try {
       let fileUrl = '';
       let fileName = '';
@@ -315,10 +286,11 @@ export const TeacherDashboard: React.FC = () => {
         fileUrl = await new Promise((resolve, reject) => {
           const timeout = setTimeout(() => {
             uploadTask.cancel();
-            reject(new Error("Upload timed out after 10 minutes."));
+            reject(new Error("Upload timed out (> 10 mins)."));
           }, 600000);
 
-          uploadTask.on('state_changed', null, 
+          uploadTask.on('state_changed', 
+            (snap) => setAssignUploadProgress((snap.bytesTransferred / snap.totalBytes) * 100),
             (error: any) => {
               clearTimeout(timeout);
               reject(error);
@@ -352,11 +324,13 @@ export const TeacherDashboard: React.FC = () => {
       setNewAssignDeadline('');
       setAssignFile(null);
       setIsAddingAssignment(false);
-      alert('Assignment created successfully!');
-    } catch (error) {
+      toast.success("Assignment created successfully!", { id: toastId });
+    } catch (error: any) {
+      toast.error(error.message || "Failed to create assignment", { id: toastId });
       handleFirestoreError(error, OperationType.CREATE, 'assignments', user || undefined);
     } finally {
       setIsAssignUploading(false);
+      setAssignUploadProgress(null);
     }
   };
 
@@ -552,6 +526,16 @@ export const TeacherDashboard: React.FC = () => {
                   </div>
                   <div className="mt-4 flex gap-2">
                     <button 
+                      onClick={(e) => { 
+                        e.stopPropagation(); 
+                        setSelectedUserDetail(student);
+                        setIsDetailModalOpen(true);
+                      }}
+                      className="flex-1 py-2 bg-slate-50 dark:bg-slate-800 text-slate-400 rounded-xl text-[10px] uppercase font-black tracking-widest hover:bg-blue-600 hover:text-white transition-all"
+                    >
+                      Details
+                    </button>
+                    <button 
                       onClick={(e) => { e.stopPropagation(); setModalStudent(student); setModalType('attendance'); }}
                       className="flex-1 py-2 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-xl text-xs font-bold hover:bg-emerald-50 dark:hover:bg-emerald-900/30 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors"
                     >
@@ -657,6 +641,7 @@ export const TeacherDashboard: React.FC = () => {
                           href={sub.fileUrl} 
                           target="_blank" 
                           rel="noopener noreferrer"
+                          referrerPolicy="no-referrer"
                           className="text-[10px] font-bold text-blue-600 flex items-center gap-1 hover:underline"
                         >
                           <FileText className="w-3 h-3" /> View File
@@ -716,6 +701,7 @@ export const TeacherDashboard: React.FC = () => {
                         href={sub.fileUrl} 
                         target="_blank" 
                         rel="noopener noreferrer" 
+                        referrerPolicy="no-referrer"
                         className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 font-black text-[10px] uppercase rounded-lg hover:bg-blue-100 transition-all border border-blue-100 dark:border-blue-800"
                       >
                         <FileText className="w-3.5 h-3.5" />
@@ -729,6 +715,13 @@ export const TeacherDashboard: React.FC = () => {
                       }`}
                     >
                       {sub.status === 'submitted' ? 'Mark Reviewed' : 'Undo'}
+                    </button>
+                    <button 
+                      onClick={() => handleDeleteSubmission(sub.id)}
+                      className="p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-all"
+                      title="Delete Submission"
+                    >
+                      <Trash2 className="w-4 h-4" />
                     </button>
                   </td>
                 </tr>
@@ -796,26 +789,31 @@ export const TeacherDashboard: React.FC = () => {
               initial={{ opacity: 0, y: -10 }}
               animate={{ opacity: 1, y: 0 }}
               onSubmit={handleAddAssignment}
-              className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-blue-100 dark:border-slate-800 shadow-sm space-y-4"
+              className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border border-blue-100 dark:border-slate-800 shadow-xl space-y-6"
             >
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <input 
-                  type="text" 
-                  placeholder="Assignment Title" 
-                  className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
-                  value={newAssignTitle}
-                  onChange={(e) => setNewAssignTitle(e.target.value)}
-                  required
-                />
-                <input 
-                  type="date" 
-                  className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
-                  value={newAssignDueDate}
-                  onChange={(e) => setNewAssignDueDate(e.target.value)}
-                  title="Due Date"
-                />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-1">
-                  <label className="text-[10px] font-black text-slate-400 uppercase px-1">Auto-Delete Deadline</label>
+                  <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Title</label>
+                  <input 
+                    type="text" 
+                    placeholder="Assignment Title" 
+                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
+                    value={newAssignTitle}
+                    onChange={(e) => setNewAssignTitle(e.target.value)}
+                    required
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Class Date</label>
+                  <input 
+                    type="date" 
+                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
+                    value={newAssignDueDate}
+                    onChange={(e) => setNewAssignDueDate(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Auto-Delete Deadline</label>
                   <input 
                     type="datetime-local" 
                     className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
@@ -824,35 +822,54 @@ export const TeacherDashboard: React.FC = () => {
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[10px] font-black text-slate-400 uppercase px-1">Attach Material (Zip/Doc/Img)</label>
-                  <input 
-                    type="file" 
-                    onChange={(e) => setAssignFile(e.target.files?.[0] || null)}
-                    className="w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-bold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
-                  />
+                  <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Attachment</label>
+                  <label className={`flex items-center gap-3 w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-2 border-dashed rounded-xl cursor-pointer transition-all ${assignFile ? 'border-blue-600' : 'border-slate-100 dark:border-slate-800'}`}>
+                    <FileText className={`w-5 h-5 ${assignFile ? 'text-blue-600' : 'text-slate-400'}`} />
+                    <span className="text-xs font-bold text-slate-500 truncate">
+                      {assignFile ? assignFile.name : 'Upload material...'}
+                    </span>
+                    <input 
+                      type="file" 
+                      onChange={(e) => setAssignFile(e.target.files?.[0] || null)}
+                      className="hidden"
+                    />
+                  </label>
                 </div>
               </div>
-              <textarea 
-                placeholder="Describe the task for your students..." 
-                className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 min-h-[120px] dark:text-white"
-                value={newAssignDesc}
-                onChange={(e) => setNewAssignDesc(e.target.value)}
-                required
-              />
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Instructions</label>
+                <textarea 
+                  placeholder="Describe the task for your students..." 
+                  className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 min-h-[120px] dark:text-white"
+                  value={newAssignDesc}
+                  onChange={(e) => setNewAssignDesc(e.target.value)}
+                  required
+                />
+              </div>
+
+              {assignUploadProgress !== null && (
+                <div className="w-full h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-blue-600 transition-all duration-300" 
+                    style={{ width: `${assignUploadProgress}%` }}
+                  />
+                </div>
+              )}
+
               <div className="flex justify-end gap-3">
                 <button 
                   type="button"
                   onClick={() => setIsAddingAssignment(false)}
-                  className="px-4 py-2 text-slate-500 dark:text-slate-400 font-semibold"
+                  className="px-6 py-3 text-slate-500 dark:text-slate-400 font-black text-xs uppercase tracking-widest hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl transition-all"
                 >
                   Cancel
                 </button>
                 <button 
                   type="submit"
                   disabled={isAssignUploading}
-                  className="px-8 py-3 bg-blue-600 text-white rounded-xl font-bold shadow-lg shadow-blue-200 disabled:opacity-50"
+                  className="px-10 py-3 bg-blue-600 text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-xl shadow-blue-200 dark:shadow-none hover:bg-blue-700 disabled:opacity-50 transition-all"
                 >
-                  {isAssignUploading ? 'Uploading...' : 'Create Assignment'}
+                  {isAssignUploading ? 'Uploading...' : 'Publish'}
                 </button>
               </div>
             </motion.form>
@@ -860,7 +877,16 @@ export const TeacherDashboard: React.FC = () => {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {assignments.map((assign) => (
-              <div key={assign.id} className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm">
+              <div key={assign.id} className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm relative group">
+                <div className="absolute top-4 right-4 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button 
+                    onClick={() => handleDeleteAssignment(assign.id)}
+                    className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-colors"
+                    title="Delete Assignment"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
                 <h3 className="font-bold text-slate-900 dark:text-white mb-2">{assign.title}</h3>
                 <p className="text-slate-600 dark:text-slate-400 text-sm leading-relaxed mb-4">{assign.description}</p>
                 <div className="flex items-center justify-between mt-4 pt-4 border-t border-slate-50 dark:border-slate-800">
@@ -1083,12 +1109,88 @@ export const TeacherDashboard: React.FC = () => {
           </div>
         )}
       </AnimatePresence>
-      <FeedbackModal 
-        isOpen={activeTab === 'feedback'}
-        onClose={() => setActiveTab('messenger')}
-        toUid={selectedContactForFeedback?.uid || ''}
-        toName={selectedContactForFeedback?.name || ''}
-      />
+      <AnimatePresence>
+        {isDetailModalOpen && selectedUserDetail && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsDetailModalOpen(false)}
+              className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="relative bg-white dark:bg-slate-900 w-full max-w-lg rounded-[2.5rem] shadow-2xl overflow-hidden"
+            >
+              <div className="p-8">
+                <div className="flex items-center justify-between mb-8">
+                  <h3 className="text-2xl font-black text-slate-900 dark:text-white">Student Details</h3>
+                  <button onClick={() => setIsDetailModalOpen(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors">
+                    <X className="w-6 h-6 text-slate-400" />
+                  </button>
+                </div>
+                
+                <div className="space-y-6">
+                  <div className="flex items-center gap-6 pb-6 border-b border-slate-100 dark:border-slate-800">
+                    <div className="w-20 h-20 bg-blue-600 rounded-3xl flex items-center justify-center text-white text-3xl font-black">
+                      {selectedUserDetail.name?.[0] || 'S'}
+                    </div>
+                    <div>
+                      <h4 className="text-xl font-black text-slate-900 dark:text-white">{selectedUserDetail.name}</h4>
+                      <p className="text-slate-500 font-bold uppercase tracking-widest text-xs">Student ID: {selectedUserDetail.id.slice(0,8)}</p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl">
+                      <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Current Grade</p>
+                      <p className="font-bold text-slate-900 dark:text-white">{selectedUserDetail.grade || 'N/A'}</p>
+                    </div>
+                    <div className="p-4 bg-emerald-50 dark:bg-emerald-900/20 rounded-2xl">
+                      <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Status</p>
+                      <p className="font-bold text-emerald-600">Enrolled</p>
+                    </div>
+                  </div>
+
+                  {selectedUserDetail.subject && (
+                    <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-2xl border border-blue-100 dark:border-blue-800">
+                      <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Specialization</p>
+                      <p className="font-bold text-blue-600">{selectedUserDetail.subject}</p>
+                    </div>
+                  )}
+
+                  <div className="pt-4 flex gap-3">
+                    <button 
+                      onClick={() => {
+                        if (selectedUserDetail.parentUid) {
+                          const parent = parents.find(p => p.uid === selectedUserDetail.parentUid);
+                          if (parent) {
+                            setSelectedParent(parent);
+                            setActiveTab('messenger');
+                          }
+                        }
+                        setIsDetailModalOpen(false);
+                      }}
+                      className="flex-1 py-4 bg-blue-600 text-white rounded-2xl font-black text-sm uppercase tracking-widest hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 dark:shadow-none"
+                    >
+                      Contact Parent
+                    </button>
+                    <button 
+                      onClick={() => setIsDetailModalOpen(false)}
+                      className="px-6 py-4 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-2xl font-black text-sm uppercase tracking-widest hover:bg-slate-200 transition-all"
+                    >
+                      Close
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

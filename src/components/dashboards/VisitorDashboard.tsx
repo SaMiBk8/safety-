@@ -5,6 +5,7 @@ import { doc, updateDoc, addDoc, collection, serverTimestamp, query, where, getD
 import { ref, uploadBytes, getDownloadURL, uploadBytesResumable } from 'firebase/storage';
 import { motion, AnimatePresence } from 'motion/react';
 import { Shield, Users, GraduationCap, MessageSquare, Send, FileText, Info, CheckCircle2, Clock, BookOpen, Activity, UserCheck } from 'lucide-react';
+import { toast } from 'sonner';
 import { UserRole, School } from '../../types';
 import { handleFirestoreError, OperationType } from '../../lib/firestore-errors';
 
@@ -174,7 +175,7 @@ export const VisitorDashboard: React.FC = () => {
       });
 
       setSubmitted(true);
-      alert('Request sent successfully!');
+      toast.success('Request sent successfully!');
     } catch (error: any) {
       console.error('Submission Error:', error);
       let errorMessage = 'Failed to submit request. Please try again.';

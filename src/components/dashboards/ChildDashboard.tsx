@@ -219,7 +219,8 @@ export const ChildDashboard: React.FC<{ onStartCall?: (channel: string, receiver
       let fileName = selectedFile?.name || (homeworkExternalLink ? "External Link" : null);
 
       if (selectedFile) {
-        if (selectedFile.size < 400 * 1024) {
+        // Files > 64KB should use Storage for reliability
+        if (selectedFile.size < 64 * 1024) {
           const reader = new FileReader();
           fileUrl = await new Promise((resolve, reject) => {
             reader.onload = () => resolve(reader.result as string);
@@ -229,11 +230,26 @@ export const ChildDashboard: React.FC<{ onStartCall?: (channel: string, receiver
         } else {
           const storageRef = ref(storage, `homework/${user.uid}/${Date.now()}_${selectedFile.name}`);
           const uploadTask = uploadBytesResumable(storageRef, selectedFile);
+          
           fileUrl = await new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+              uploadTask.cancel();
+              reject(new Error("Upload timed out (> 5 mins). Please check your connection."));
+            }, 300000);
+
             uploadTask.on('state_changed', 
-              (snap) => setUploadProgress((snap.bytesTransferred / snap.totalBytes) * 100),
-              reject,
-              async () => resolve(await getDownloadURL(uploadTask.snapshot.ref))
+              (snap) => {
+                const progress = (snap.bytesTransferred / snap.totalBytes) * 100;
+                setUploadProgress(progress);
+              },
+              (err) => {
+                clearTimeout(timeout);
+                reject(err);
+              },
+              async () => {
+                clearTimeout(timeout);
+                resolve(await getDownloadURL(uploadTask.snapshot.ref));
+              }
             );
           });
         }
@@ -530,34 +546,72 @@ export const ChildDashboard: React.FC<{ onStartCall?: (channel: string, receiver
 
                 {selectedDetail.type === 'assignment' && (
                   <>
-                    <div>
-                      <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Due Date</h4>
-                      <div className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-2">
-                        <Clock className="w-4 h-4 text-blue-500" />
-                        {formatDate(selectedDetail.dueDate) || 'No due date set'}
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Due Date</h4>
+                        <div className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-2">
+                          <Clock className="w-4 h-4 text-blue-500" />
+                          {formatDate(selectedDetail.dueDate) || 'No deadline'}
+                        </div>
+                      </div>
+                      <div>
+                        <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Teacher</h4>
+                        <div className="font-bold text-slate-700 dark:text-slate-300">
+                          {selectedDetail.teacherName || 'Assigned Teacher'}
+                        </div>
                       </div>
                     </div>
                     <div>
                       <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Instructions</h4>
-                      <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl text-slate-600 dark:text-slate-400 text-sm leading-relaxed border border-slate-100 dark:border-slate-800">
-                        {selectedDetail.description || 'No additional instructions provided.'}
+                      <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl text-slate-600 dark:text-slate-400 text-sm leading-relaxed border border-slate-100 dark:border-slate-800 shadow-inner">
+                        {selectedDetail.description || 'No additional instructions.'}
                       </div>
                     </div>
                     {selectedDetail.fileUrl && (
                       <div>
-                        <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Assignment Material</h4>
+                        <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Material</h4>
                         <a 
                           href={selectedDetail.fileUrl} 
                           target="_blank" 
                           rel="noopener noreferrer"
-                          className="w-full flex items-center justify-center gap-2 py-4 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded-2xl font-black text-sm uppercase tracking-widest border border-blue-100 dark:border-blue-800 hover:bg-blue-100 transition-all"
+                          className="w-full flex items-center justify-center gap-2 py-4 bg-blue-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-blue-700 transition-all shadow-lg"
                         >
-                          <FileText className="w-5 h-5" />
-                          Download / View Material
+                          <FileText className="w-4 h-4" />
+                          Open Attachment
                         </a>
                       </div>
                     )}
                   </>
+                )}
+
+                {selectedDetail.type === 'teacher' && (
+                  <div className="space-y-6">
+                    <div className="flex items-center gap-6">
+                      <div className="w-20 h-20 bg-blue-600 rounded-[2rem] flex items-center justify-center text-white text-3xl font-black shadow-xl">
+                        {selectedDetail.displayName?.[0]}
+                      </div>
+                      <div>
+                        <div className="text-2xl font-black text-slate-900 dark:text-white">{selectedDetail.displayName}</div>
+                        <div className="text-sm font-bold text-blue-600 uppercase tracking-widest">{selectedDetail.subject || 'Specialist'}</div>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-800">
+                        <div className="text-[10px] font-black uppercase text-slate-400 mb-1">Email</div>
+                        <div className="text-xs font-bold text-slate-600 dark:text-slate-300 truncate">{selectedDetail.email}</div>
+                      </div>
+                      <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-800">
+                        <div className="text-[10px] font-black uppercase text-slate-400 mb-1">Status</div>
+                        <div className="text-xs font-black text-emerald-500 uppercase">Active</div>
+                      </div>
+                    </div>
+                    <button 
+                      onClick={() => setActiveTab('messages')}
+                      className="w-full py-4 bg-slate-950 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-800 transition-all shadow-xl"
+                    >
+                      Send Message
+                    </button>
+                  </div>
                 )}
 
                 {selectedDetail.type === 'quran' && (
