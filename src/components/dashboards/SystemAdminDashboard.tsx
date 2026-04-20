@@ -218,6 +218,28 @@ export const SystemAdminDashboard: React.FC = () => {
     });
 
     await Promise.all(deletePromises);
+
+    // Cleanup references in other users
+    try {
+      // 1. If this was a parent, clear parentId for all children
+      const childrenQuery = query(collection(db, 'users'), where('parentId', '==', uid));
+      const childrenSnap = await getDocs(childrenQuery);
+      const childUpdates = childrenSnap.docs.map(d => updateDoc(d.ref, { parentId: null }));
+      await Promise.all(childUpdates);
+
+      // 2. If this was a child, remove from parent's childIds
+      const parentsQuery = query(collection(db, 'users'), where('childIds', 'array-contains', uid));
+      const parentsSnap = await getDocs(parentsQuery);
+      const parentUpdates = parentsSnap.docs.map(d => {
+        const data = d.data();
+        const newChildIds = (data.childIds || []).filter((id: string) => id !== uid);
+        return updateDoc(d.ref, { childIds: newChildIds });
+      });
+      await Promise.all(parentUpdates);
+    } catch (e) {
+      console.warn("Could not cleanup user references:", e);
+    }
+
     await deleteDoc(doc(db, 'users', uid));
   };
 
