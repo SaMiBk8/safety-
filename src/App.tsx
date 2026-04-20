@@ -169,7 +169,7 @@ const VideoCallWrapper = () => {
 const Dashboard = () => {
   const { user, profile, loading, isAdmin, isSchoolAdmin, isTeacher, isQuranTeacher, isSportsCoach, isParent, isChild, isAuthorizedPerson, isVisitor } = useAuth();
   const { theme, toggleTheme } = useTheme();
-  const [activeCall, setActiveCall] = useState<{ channel: string } | null>(null);
+  const [activeCall, setActiveCall] = useState<{ id: string, channel: string } | null>(null);
   const [incomingCall, setIncomingCall] = useState<{ id: string, callerName: string, channel: string } | null>(null);
   
   const isDarkMode = theme === 'dark';
@@ -198,7 +198,7 @@ const Dashboard = () => {
     if (!incomingCall) return;
     try {
       await updateDoc(doc(db, 'calls', incomingCall.id), { status: 'accepted' });
-      setActiveCall({ channel: incomingCall.channel });
+      setActiveCall({ id: incomingCall.id, channel: incomingCall.channel });
       setIncomingCall(null);
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `calls/${incomingCall.id}`, user || undefined);
@@ -218,7 +218,7 @@ const Dashboard = () => {
   const startCall = async (channel: string, receiverId?: string, receiverName?: string) => {
     if (receiverId) {
       try {
-        await addDoc(collection(db, 'calls'), {
+        const docRef = await addDoc(collection(db, 'calls'), {
           callerId: user?.uid,
           callerName: user?.displayName || 'User',
           receiverId,
@@ -226,11 +226,14 @@ const Dashboard = () => {
           status: 'pending',
           createdAt: serverTimestamp()
         });
+        setActiveCall({ id: docRef.id, channel });
       } catch (error) {
         handleFirestoreError(error, OperationType.CREATE, 'calls', user || undefined);
       }
+    } else {
+      // For anonymous or group calls, we might not have a specific call record
+      setActiveCall({ id: `standalone_${channel}`, channel });
     }
-    setActiveCall({ channel });
   };
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [showInstallBanner, setShowInstallBanner] = useState(false);
@@ -460,6 +463,7 @@ const Dashboard = () => {
         <VideoCall 
           appId={import.meta.env.VITE_AGORA_APP_ID || ""}
           channel={activeCall.channel}
+          callId={activeCall.id}
           token={import.meta.env.VITE_AGORA_TOKEN}
           onClose={() => setActiveCall(null)}
         />

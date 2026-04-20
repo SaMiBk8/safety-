@@ -1,16 +1,19 @@
 import React, { useEffect, useRef, useState } from 'react';
 import AgoraRTC, { IAgoraRTCClient, ICameraVideoTrack, IMicrophoneAudioTrack } from 'agora-rtc-sdk-ng';
-import { X, Mic, MicOff, Video, VideoOff, PhoneOff } from 'lucide-react';
+import { X, Mic, MicOff, Video, VideoOff, PhoneOff, Maximize2, Minimize2 } from 'lucide-react';
+import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 
 interface VideoCallProps {
   appId: string;
   channel: string;
+  callId?: string;
   token?: string;
   uid?: string | number;
   onClose: () => void;
 }
 
-export const VideoCall: React.FC<VideoCallProps> = ({ appId, channel, token, uid, onClose }) => {
+export const VideoCall: React.FC<VideoCallProps> = ({ appId, channel, callId, token, uid, onClose }) => {
   const [client, setClient] = useState<IAgoraRTCClient | null>(null);
   const [localVideoTrack, setLocalVideoTrack] = useState<ICameraVideoTrack | null>(null);
   const [localAudioTrack, setLocalAudioTrack] = useState<IMicrophoneAudioTrack | null>(null);
@@ -21,6 +24,37 @@ export const VideoCall: React.FC<VideoCallProps> = ({ appId, channel, token, uid
 
   const localVideoRef = useRef<HTMLDivElement>(null);
   const isInitializing = useRef(false);
+  const [isFullScreen, setIsFullScreen] = useState(true);
+
+  // Sync Call Status
+  useEffect(() => {
+    if (!callId || callId.startsWith('standalone_')) return;
+
+    const unsubscribe = onSnapshot(doc(db, 'calls', callId), (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        if (data.status === 'ended' || data.status === 'rejected') {
+          onClose();
+        }
+      } else {
+        // If document was deleted, end call
+        onClose();
+      }
+    });
+
+    return () => unsubscribe();
+  }, [callId, onClose]);
+
+  const endCall = async () => {
+    if (callId && !callId.startsWith('standalone_')) {
+      try {
+        await updateDoc(doc(db, 'calls', callId), { status: 'ended' });
+      } catch (e) {
+        console.error('Error ending call:', e);
+      }
+    }
+    onClose();
+  };
 
   useEffect(() => {
     let mounted = true;
@@ -101,13 +135,34 @@ export const VideoCall: React.FC<VideoCallProps> = ({ appId, channel, token, uid
         } catch (joinErr: any) {
           if (joinErr.message === 'OPERATION_ABORTED' || !mounted) return;
           
-          // Smart Fallback: If join with token fails with a timeout or certificate error, 
-          // try joining WITHOUT a token (in case App Certificate is disabled)
-          const isTokenError = joinErr.message?.includes('token') || 
-                               joinErr.message?.includes('timeout') || 
-                               joinErr.code === 'CAN_NOT_GET_GATEWAY_SERVER';
-          
-          if (isTokenError && activeToken) {
+          // If we used a pre-set token from VITE_AGORA_TOKEN and it failed with timeout/key error,
+          // it is likely expired. We should try to clear it and force a server token fetch.
+          const isTokenTimeout = joinErr.message?.includes('timeout') || 
+                                 joinErr.message?.includes('key') ||
+                                 joinErr.code === 'CAN_NOT_GET_GATEWAY_SERVER';
+
+          if (isTokenTimeout && token && activeToken === token) {
+            console.warn('Environment token likely expired, retrying with server token...');
+            // In a real app we might update state, but here we can just try one immediate retry with server fetch
+            try {
+              const resp = await fetch(`/api/agora/token?channelName=${encodeURIComponent(channel)}&t=${Date.now()}`);
+              if (resp.ok) {
+                const data = await resp.json();
+                if (data.token) {
+                   await agoraClient.join(trimmedAppId, channel, data.token, 0);
+                   console.log('Retry join with server token successful');
+                   // Fall through to track setup
+                } else {
+                   throw joinErr;
+                }
+              } else {
+                throw joinErr;
+              }
+            } catch (retryErr) {
+               console.error('Retry with server token failed:', retryErr);
+               throw joinErr;
+            }
+          } else if (isTokenTimeout && activeToken) {
             console.warn('Join with token failed, attempting fallback join without token...');
             try {
               await agoraClient.join(trimmedAppId, channel, null, 0);
@@ -196,27 +251,27 @@ export const VideoCall: React.FC<VideoCallProps> = ({ appId, channel, token, uid
   };
 
   return (
-    <div className="fixed inset-0 z-[100] bg-slate-900 flex flex-col items-center justify-center p-4">
-      <div className="relative w-full max-w-4xl aspect-video bg-black rounded-3xl overflow-hidden shadow-2xl border border-white/10 flex items-center justify-center">
+    <div className={`fixed inset-0 z-[100] bg-black flex flex-col items-center justify-center ${isFullScreen ? 'p-0 overflow-hidden' : 'p-4'}`}>
+      <div className={`relative w-full h-full bg-black overflow-hidden shadow-2xl ${isFullScreen ? 'w-screen h-[100dvh]' : 'max-w-4xl aspect-video rounded-3xl border border-white/10'} flex items-center justify-center`}>
         {error ? (
-          <div className="p-8 text-center space-y-4 max-w-md">
+          <div className="p-8 text-center space-y-4 max-w-sm bg-slate-900 rounded-[2.5rem] shadow-2xl">
             <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto">
               <PhoneOff className="w-8 h-8 text-red-500" />
             </div>
-            <h3 className="text-xl font-bold text-white">Call Failed</h3>
-            <p className="text-slate-400 text-sm leading-relaxed whitespace-pre-line">
+            <h3 className="text-xl font-bold text-white uppercase tracking-tight">Call Failed</h3>
+            <p className="text-slate-400 text-sm leading-relaxed">
               {error}
             </p>
-            <div className="flex gap-3 justify-center">
+            <div className="flex gap-3 justify-center pt-2">
               <button 
                 onClick={() => window.location.reload()}
-                className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold transition-all"
+                className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold transition-all"
               >
                 Retry
               </button>
               <button 
-                onClick={onClose}
-                className="px-6 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl font-bold transition-all"
+                onClick={endCall}
+                className="px-6 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl font-bold transition-all"
               >
                 Close
               </button>
@@ -225,73 +280,75 @@ export const VideoCall: React.FC<VideoCallProps> = ({ appId, channel, token, uid
         ) : (
           <>
             {/* Remote Videos */}
-            <div className="absolute inset-0">
+            <div className="absolute inset-0 z-0">
               {remoteUsers.length === 0 ? (
-                <div className="w-full h-full flex flex-col items-center justify-center text-slate-500 bg-slate-900/50 backdrop-blur-sm">
-                  <div className="w-20 h-20 bg-white/5 rounded-full flex items-center justify-center mb-4 animate-pulse">
+                <div className="w-full h-full flex flex-col items-center justify-center text-slate-500 bg-slate-950">
+                  <div className="w-20 h-20 bg-white/5 rounded-full flex items-center justify-center mb-6 animate-pulse">
                     <Video className="w-10 h-10 text-slate-700" />
                   </div>
-                  <p className="font-medium">Waiting for other participant...</p>
-                  <p className="text-xs opacity-50 mt-1">They will appear here once they join</p>
+                  <p className="font-bold text-slate-400 tracking-wide uppercase text-xs">Waiting for participant...</p>
+                  <p className="text-xs opacity-40 mt-2">Connecting to secure stream</p>
                 </div>
               ) : remoteUsers.length === 1 ? (
-                <div className="w-full h-full relative bg-slate-800">
+                <div className="w-full h-full relative">
                   <RemoteVideoPlayer user={remoteUsers[0]} />
-                  <div className="absolute bottom-4 left-4 bg-black/40 backdrop-blur-md px-4 py-2 rounded-2xl text-white text-xs font-bold border border-white/10 flex items-center gap-2">
-                    <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
-                    Live Connection
+                  <div className="absolute top-safe mt-6 left-6 flex items-center gap-2 bg-black/40 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/10">
+                    <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
+                    <span className="text-[10px] text-white font-bold uppercase tracking-widest">Live</span>
                   </div>
                 </div>
               ) : (
-                <div className="w-full h-full grid grid-cols-2 gap-2 p-2 bg-slate-900">
+                <div className="w-full h-full grid grid-cols-2 gap-px bg-slate-900">
                   {remoteUsers.map((user) => (
-                    <div key={user.uid} className="relative bg-slate-800 rounded-2xl overflow-hidden border border-white/5">
+                    <div key={user.uid} className="relative bg-slate-800">
                       <RemoteVideoPlayer user={user} />
-                      <div className="absolute bottom-4 left-4 bg-black/50 px-3 py-1 rounded-lg text-white text-[10px] font-bold">
-                        Remote User
-                      </div>
                     </div>
                   ))}
                 </div>
               )}
             </div>
 
-            {/* Local Video (Picture-in-Picture) */}
+            {/* Local Video (Floating) */}
             <div 
               ref={localVideoRef}
-              className="absolute bottom-6 right-6 w-32 md:w-48 aspect-video bg-slate-800 rounded-2xl overflow-hidden border-2 border-white/20 shadow-xl z-10"
+              className="absolute top-safe mt-6 right-6 w-24 sm:w-32 md:w-48 aspect-[3/4] sm:aspect-video bg-slate-800 rounded-2xl overflow-hidden border-2 border-white/30 shadow-2xl z-10"
             />
 
             {/* Controls Overlay */}
-            <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center gap-4 px-6 py-4 bg-black/40 backdrop-blur-xl rounded-full border border-white/10 z-20">
+            <div className="absolute bottom-safe mb-8 left-1/2 -translate-x-1/2 flex items-center gap-3 sm:gap-6 px-4 sm:px-8 py-3 sm:py-5 bg-black/20 backdrop-blur-3xl rounded-full border border-white/10 z-20 transition-all hover:bg-black/40">
               <button 
                 onClick={toggleMute}
-                className={`p-4 rounded-full transition-all ${isMuted ? 'bg-red-500 text-white' : 'bg-white/10 text-white hover:bg-white/20'}`}
+                className={`p-3 sm:p-4 rounded-full transition-all ${isMuted ? 'bg-red-500 text-white' : 'bg-white/10 text-white hover:bg-white/20'}`}
               >
-                {isMuted ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
+                {isMuted ? <MicOff className="w-5 h-5 sm:w-6 h-6" /> : <Mic className="w-5 h-5 sm:w-6 h-6" />}
               </button>
               
               <button 
-                onClick={onClose}
-                className="p-4 bg-red-600 text-white rounded-full hover:bg-red-700 transition-all shadow-lg shadow-red-500/20"
+                onClick={endCall}
+                className="p-4 sm:p-5 bg-red-600 text-white rounded-full hover:bg-red-700 transition-all shadow-2xl shadow-red-600/40 active:scale-90"
               >
-                <PhoneOff className="w-8 h-8" />
+                <PhoneOff className="w-7 h-7 sm:w-9 h-9" />
               </button>
 
               <button 
                 onClick={toggleVideo}
-                className={`p-4 rounded-full transition-all ${isVideoOff ? 'bg-red-500 text-white' : 'bg-white/10 text-white hover:bg-white/20'}`}
+                className={`p-3 sm:p-4 rounded-full transition-all ${isVideoOff ? 'bg-red-500 text-white' : 'bg-white/10 text-white hover:bg-white/20'}`}
               >
-                {isVideoOff ? <VideoOff className="w-6 h-6" /> : <Video className="w-6 h-6" />}
+                {isVideoOff ? <VideoOff className="w-5 h-5 sm:w-6 h-6" /> : <Video className="w-5 h-5 sm:w-6 h-6" />}
+              </button>
+            </div>
+
+            {/* Desktop Switcher */}
+            <div className="absolute bottom-10 right-10 hidden sm:flex z-20">
+              <button 
+                onClick={() => setIsFullScreen(!isFullScreen)}
+                className="p-3 bg-white/10 text-white rounded-xl hover:bg-white/20 transition-all backdrop-blur-md"
+              >
+                {isFullScreen ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
               </button>
             </div>
           </>
         )}
-      </div>
-      
-      <div className="mt-6 text-white/50 text-sm font-medium flex items-center gap-2">
-        <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
-        Secure Encrypted Channel: {channel}
       </div>
     </div>
   );

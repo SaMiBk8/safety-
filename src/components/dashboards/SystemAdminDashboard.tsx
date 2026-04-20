@@ -175,27 +175,72 @@ export const SystemAdminDashboard: React.FC = () => {
     }
   };
 
+  const performCascadingDelete = async (uid: string) => {
+    const collectionsToCleanup = [
+      { name: 'visitor_messages', field: 'uid' },
+      { name: 'students', field: 'childUid' },
+      { name: 'students', field: 'parentUid' },
+      { name: 'sos_alerts', field: 'childUid' },
+      { name: 'sos_alerts', field: 'parentUid' },
+      { name: 'assignments', field: 'teacherId' },
+      { name: 'homework_submissions', field: 'studentId' },
+      { name: 'homework_submissions', field: 'childUid' },
+      { name: 'homework_submissions', field: 'teacherId' },
+      { name: 'attendance', field: 'studentId' },
+      { name: 'attendance', field: 'teacherId' },
+      { name: 'grades', field: 'studentId' },
+      { name: 'grades', field: 'teacherId' },
+      { name: 'quran_progress', field: 'studentId' },
+      { name: 'quran_progress', field: 'teacherId' },
+      { name: 'sports_training', field: 'studentId' },
+      { name: 'sports_training', field: 'teacherId' },
+      { name: 'incidents', field: 'studentId' },
+      { name: 'incidents', field: 'teacherId' },
+      { name: 'messages', field: 'senderId' },
+      { name: 'messages', field: 'receiverId' },
+      { name: 'calls', field: 'callerId' },
+      { name: 'calls', field: 'receiverId' },
+      { name: 'feedbacks', field: 'fromUid' },
+      { name: 'feedbacks', field: 'toUid' },
+      { name: 'schedules', field: 'teacherUid' },
+      { name: 'schedules', field: 'teacherId' }
+    ];
+
+    const deletePromises = collectionsToCleanup.map(async (cfg) => {
+      try {
+        const q = query(collection(db, cfg.name), where(cfg.field, '==', uid));
+        const snap = await getDocs(q);
+        const docsToDelete = snap.docs.map(d => deleteDoc(d.ref));
+        await Promise.all(docsToDelete);
+      } catch (e) {
+        console.warn(`Could not cleanup collection ${cfg.name}:`, e);
+      }
+    });
+
+    await Promise.all(deletePromises);
+    await deleteDoc(doc(db, 'users', uid));
+  };
+
   const cleanupAccounts = async () => {
     setIsCleaning(true);
+    const toastId = toast.loading('Performing deep cleanup of all non-admin accounts...');
     try {
       const nonAdmins = users.filter(u => u.role !== 'system_admin');
-      const deletePromises = nonAdmins.flatMap(u => [
-        deleteDoc(doc(db, 'users', u.uid)),
-        // We can't easily query all collections here without multiple calls, 
-        // but let's at least clear their visitor messages
-      ]);
-      await Promise.all(deletePromises);
+      
+      for (const u of nonAdmins) {
+        await performCascadingDelete(u.uid);
+      }
 
-      // Clear visitor messages for all deleted users
+      // Also clear visitor messages that might not be linked to a current user
       const msgSnap = await getDocs(collection(db, 'visitor_messages'));
-      const msgDeletes = msgSnap.docs.map(d => deleteDoc(d.ref));
-      await Promise.all(msgDeletes);
+      await Promise.all(msgSnap.docs.map(d => deleteDoc(d.ref)));
 
       setShowCleanupConfirm(false);
       setSelectedUserIds([]);
-      toast.success('All non-admin accounts and visitor requests have been cleared.');
+      toast.success('All non-admin accounts and their complete history have been cleared.', { id: toastId });
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, 'users', user || undefined);
+      toast.error('Cleanup failed', { id: toastId });
     } finally {
       setIsCleaning(false);
     }
@@ -226,26 +271,22 @@ export const SystemAdminDashboard: React.FC = () => {
     }
 
     console.log('Attempting to delete selected users:', idsToDelete);
-    if (!window.confirm(`Are you sure you want to permanently delete ${idsToDelete.length} accounts? This action cannot be undone.`)) return;
+    if (!window.confirm(`Are you sure you want to permanently delete ${idsToDelete.length} accounts and ALL their associated data (messages, SOS, homework, etc)? This action cannot be undone.`)) return;
     
     setIsDeletingSelected(true);
+    const toastId = toast.loading(`Deleting ${idsToDelete.length} accounts and related data...`);
     try {
       for (const uid of idsToDelete) {
-        await deleteDoc(doc(db, 'users', uid));
-        
-        // Delete their visitor messages
-        const msgQuery = query(collection(db, 'visitor_messages'), where('uid', '==', uid));
-        const msgSnap = await getDocs(msgQuery);
-        const msgDeletes = msgSnap.docs.map(d => deleteDoc(d.ref));
-        await Promise.all(msgDeletes);
+        await performCascadingDelete(uid);
       }
       
       console.log('Successfully deleted selected users and their data');
       setSelectedUserIds([]);
-      toast.success(`Successfully deleted ${idsToDelete.length} accounts and their related data.`);
+      toast.success(`Successfully deleted ${idsToDelete.length} accounts and all their related information.`, { id: toastId });
     } catch (error) {
       console.error('Delete selected users failed:', error);
       handleFirestoreError(error, OperationType.DELETE, 'users', user || undefined);
+      toast.error('Deletion failed', { id: toastId });
     } finally {
       setIsDeletingSelected(false);
     }
@@ -262,22 +303,18 @@ export const SystemAdminDashboard: React.FC = () => {
       console.error('No UID provided for deletion');
       return;
     }
-    if (!window.confirm('Are you sure you want to permanently delete this account? This action cannot be undone.')) return;
+    if (!window.confirm('Are you sure you want to permanently delete this account and ALL its associated data (messages, SOS, homework, etc)? This action cannot be undone.')) return;
+    
+    const toastId = toast.loading('Deleting account and all associated data...');
     try {
-      // Delete user document
-      await deleteDoc(doc(db, 'users', uid));
-      
-      // Delete their visitor messages
-      const msgQuery = query(collection(db, 'visitor_messages'), where('uid', '==', uid));
-      const msgSnap = await getDocs(msgQuery);
-      const msgDeletes = msgSnap.docs.map(d => deleteDoc(d.ref));
-      await Promise.all(msgDeletes);
+      await performCascadingDelete(uid);
 
       console.log('Successfully deleted user and related data:', uid);
-      toast.success('Account and related data successfully deleted.');
+      toast.success('Account and all related data successfully deleted.', { id: toastId });
     } catch (error) {
       console.error('Delete user failed:', error);
       handleFirestoreError(error, OperationType.DELETE, `users/${uid}`, user || undefined);
+      toast.error('Deletion failed', { id: toastId });
     }
   };
 

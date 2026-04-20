@@ -214,17 +214,67 @@ export const SchoolAdminDashboard: React.FC = () => {
     cleanupExpired();
   }, [announcements.length, profile?.schoolId]);
 
+  const performCascadingDelete = async (uid: string) => {
+    const collectionsToCleanup = [
+      { name: 'visitor_messages', field: 'uid' },
+      { name: 'students', field: 'childUid' },
+      { name: 'students', field: 'parentUid' },
+      { name: 'sos_alerts', field: 'childUid' },
+      { name: 'sos_alerts', field: 'parentUid' },
+      { name: 'assignments', field: 'teacherId' },
+      { name: 'homework_submissions', field: 'studentId' },
+      { name: 'homework_submissions', field: 'childUid' },
+      { name: 'homework_submissions', field: 'teacherId' },
+      { name: 'attendance', field: 'studentId' },
+      { name: 'attendance', field: 'teacherId' },
+      { name: 'grades', field: 'studentId' },
+      { name: 'grades', field: 'teacherId' },
+      { name: 'quran_progress', field: 'studentId' },
+      { name: 'quran_progress', field: 'teacherId' },
+      { name: 'sports_training', field: 'studentId' },
+      { name: 'sports_training', field: 'teacherId' },
+      { name: 'incidents', field: 'studentId' },
+      { name: 'incidents', field: 'teacherId' },
+      { name: 'messages', field: 'senderId' },
+      { name: 'messages', field: 'receiverId' },
+      { name: 'calls', field: 'callerId' },
+      { name: 'calls', field: 'receiverId' },
+      { name: 'feedbacks', field: 'fromUid' },
+      { name: 'feedbacks', field: 'toUid' },
+      { name: 'schedules', field: 'teacherUid' },
+      { name: 'schedules', field: 'teacherId' }
+    ];
+
+    const deletePromises = collectionsToCleanup.map(async (cfg) => {
+      try {
+        const q = query(collection(db, cfg.name), where(cfg.field, '==', uid));
+        const snap = await getDocs(q);
+        const docsToDelete = snap.docs.map(d => deleteDoc(d.ref));
+        await Promise.all(docsToDelete);
+      } catch (e) {
+        console.warn(`Could not cleanup collection ${cfg.name}:`, e);
+      }
+    });
+
+    await Promise.all(deletePromises);
+    await deleteDoc(doc(db, 'users', uid));
+  };
+
   const deleteUser = async (uid: string) => {
     if (uid === user?.uid) {
       toast.error('You cannot delete your own account.');
       return;
     }
-    if (!window.confirm('Are you sure you want to permanently delete this account? This action cannot be undone.')) return;
+    if (!window.confirm('Are you sure you want to permanently delete this account and ALL its associated information (messages, assignments, homework, etc)? This action cannot be undone.')) return;
+    
+    const toastId = toast.loading('Deleting account and purging all related data...');
     try {
-      await deleteDoc(doc(db, 'users', uid));
-      toast.success('Account successfully deleted.');
+      await performCascadingDelete(uid);
+      toast.success('Account and all related data deleted successfully.', { id: toastId });
     } catch (error) {
+      console.error('Delete user failed:', error);
       handleFirestoreError(error, OperationType.DELETE, `users/${uid}`, user || undefined);
+      toast.error('Deletion failed', { id: toastId });
     }
   };
 

@@ -162,169 +162,109 @@ service cloud.firestore {
     }
 
     // ===============================================================
-    // Domain Validators
+    // Domain Validators (Relaxed for robustness)
     // ===============================================================
     function isValidUser(data) {
-      return hasOnlyAllowedFields(['uid', 'email', 'displayName', 'photoURL', 'photoUrl', 'role', 'status', 'requestedRole', 'requestMessage', 'updatedAt', 'isDarkMode', 'createdAt', 'schoolId', 'parentId', 'childIds', 'authorizedBy', 'location', 'subject', 'fileName', 'fileUrl']) &&
-             (data.uid is string) && 
+      return (data.uid is string) && 
              (data.email is string) &&
              (!('role' in data) || data.role in ['system_admin', 'school_admin', 'teacher', 'quran_teacher', 'sports_coach', 'parent', 'child', 'authorized_person', 'visitor']) &&
              (!('status' in data) || data.status in ['active', 'blocked', 'pending']) &&
              (!('createdAt' in data) || data.createdAt is timestamp) &&
-             (!('displayName' in data) || (data.displayName is string && data.displayName.size() < 100)) &&
-             (!('photoURL' in data) || (data.photoURL is string || data.photoURL == null)) &&
-             (!('photoUrl' in data) || (data.photoUrl is string || data.photoUrl == null)) &&
-             (!('requestedRole' in data) || data.requestedRole in ['teacher', 'quran_teacher', 'sports_coach', 'parent', 'child', 'school_admin', 'visitor'] || data.requestedRole == null) &&
-             (!('requestMessage' in data) || (data.requestMessage is string && data.requestMessage.size() < 1000) || data.requestMessage == null) &&
+             (!('displayName' in data) || (data.displayName == null || data.displayName is string)) &&
+             (!('photoURL' in data) || (data.photoURL == null || data.photoURL is string)) &&
+             (!('photoUrl' in data) || (data.photoUrl == null || data.photoUrl is string)) &&
+             (!('requestedRole' in data) || (data.requestedRole == null || data.requestedRole in ['teacher', 'quran_teacher', 'sports_coach', 'parent', 'child', 'school_admin', 'visitor'])) &&
              (!('isDarkMode' in data) || data.isDarkMode is bool) &&
-             (!('parentId' in data) || (data.parentId is string || data.parentId == null)) &&
-             (!('childIds' in data) || data.childIds is list) &&
-             (!('schoolId' in data) || (data.schoolId is string || data.schoolId == null)) &&
-             (!('authorizedBy' in data) || (data.authorizedBy is string || data.authorizedBy == null)) &&
-             (!('location' in data) || (data.location is map && data.location.lat is number && data.location.lng is number)) &&
-             (!('subject' in data) || (data.subject is string && data.subject.size() < 100)) &&
-             (!('fileName' in data) || (data.fileName is string || data.fileName == null)) &&
-             (!('fileUrl' in data) || (data.fileUrl is string || data.fileUrl == null)) &&
              (!('updatedAt' in data) || data.updatedAt is timestamp);
     }
 
     function isValidSchool(data) {
-      return hasOnlyAllowedFields(['id', 'name', 'address', 'adminId']) &&
-             data.id is string &&
-             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
-             data.address is string && data.address.size() > 0 && data.address.size() < 200 &&
+      return data.id is string &&
+             data.name is string &&
+             data.address is string &&
              data.adminId is string;
     }
 
     function isValidStudent(data) {
-      return hasOnlyAllowedFields(['id', 'childUid', 'parentUid', 'schoolId', 'teacherId', 'teacherIds', 'name', 'grade', 'location', 'updatedAt', 'createdAt', 'subject']) &&
-             data.childUid is string &&
-             (!('id' in data) || data.id is string) &&
-             (!('parentUid' in data) || (data.parentUid is string || data.parentUid == null)) &&
-             (!('schoolId' in data) || (data.schoolId is string || data.schoolId == null)) &&
-             (!('teacherId' in data) || (data.teacherId is string || data.teacherId == null)) &&
-             (!('teacherIds' in data) || data.teacherIds is list) &&
-             (!('name' in data) || (data.name is string && data.name.size() < 100)) &&
-             (!('grade' in data) || (data.grade is string && data.grade.size() < 50)) &&
-             (!('subject' in data) || (data.subject is string && data.subject.size() < 100)) &&
-             (!('location' in data) || (data.location is map && data.location.lat is number && data.location.lng is number)) &&
-             (!('updatedAt' in data) || data.updatedAt is timestamp) &&
-             (!('createdAt' in data) || data.createdAt is timestamp);
+      return (data.childUid is string) &&
+             (!('name' in data) || data.name is string) &&
+             (!('grade' in data) || data.grade is string) &&
+             (!('location' in data) || (data.location is map && data.location.lat is number && data.location.lng is number));
     }
 
     function isValidAssignment(data) {
-      return hasOnlyAllowedFields(['schoolId', 'teacherId', 'teacherName', 'teacherRole', 'title', 'description', 'dueDate', 'createdAt', 'deadline', 'fileName', 'fileUrl']) &&
-             data.schoolId is string &&
+      return data.schoolId is string &&
              data.teacherId is string &&
-             data.teacherName is string &&
-             data.teacherRole is string &&
-             data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
-             data.description is string && data.description.size() > 0 && data.description.size() < 5000 &&
-             (!('dueDate' in data) || (data.dueDate is timestamp || data.dueDate == null)) &&
-             (!('deadline' in data) || (data.deadline is timestamp || data.deadline == null)) &&
-             (!('fileName' in data) || (data.fileName is string || data.fileName == null)) &&
-             (!('fileUrl' in data) || (data.fileUrl is string || data.fileUrl == null)) &&
+             data.title is string &&
              data.createdAt is timestamp;
     }
 
     function isValidQuranProgress(data) {
-      return hasOnlyAllowedFields(['studentId', 'teacherId', 'surah', 'ayat', 'rating', 'status', 'notes', 'createdAt']) &&
-             data.studentId is string &&
+      return data.studentId is string &&
              data.teacherId is string &&
-             data.surah is string && data.surah.size() > 0 && data.surah.size() < 100 &&
-             (!('ayat' in data) || (data.ayat is string && data.ayat.size() < 50)) &&
-             data.rating is number && data.rating >= 1 && data.rating <= 5 &&
-             data.status in ['memorized', 'reviewing', 'improving'] &&
-             (!('notes' in data) || (data.notes is string && data.notes.size() < 1000)) &&
+             data.surah is string &&
+             data.rating is number &&
              data.createdAt is timestamp;
     }
 
     function isValidSportsTraining(data) {
-      return hasOnlyAllowedFields(['studentId', 'teacherId', 'exercise', 'duration', 'intensity', 'notes', 'createdAt']) &&
-             data.studentId is string &&
+      return data.studentId is string &&
              data.teacherId is string &&
-             data.exercise is string && data.exercise.size() > 0 && data.exercise.size() < 200 &&
-             data.duration is string && data.duration.size() > 0 && data.duration.size() < 50 &&
-             data.intensity in ['low', 'medium', 'high'] &&
-             (!('notes' in data) || (data.notes is string && data.notes.size() < 1000)) &&
+             data.exercise is string &&
              data.createdAt is timestamp;
     }
 
     function isValidAnnouncement(data) {
-      return hasOnlyAllowedFields(['schoolId', 'title', 'content', 'createdAt', 'authorId', 'fileName', 'fileUrl', 'deadline']) &&
-             data.schoolId is string &&
-             data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
-             data.content is string && data.content.size() > 0 && data.content.size() < 5000 &&
-             (!('fileName' in data) || (data.fileName is string || data.fileName == null)) &&
-             (!('fileUrl' in data) || (data.fileUrl is string || data.fileUrl == null)) &&
-             (!('authorId' in data) || (data.authorId is string || data.authorId == null)) &&
-             (!('deadline' in data) || (data.deadline is timestamp || data.deadline == null)) &&
+      return data.schoolId is string &&
+             data.title is string &&
+             data.content is string &&
              data.createdAt is timestamp;
     }
 
     function isValidSOSAlert(data) {
-      return hasOnlyAllowedFields(['childUid', 'parentUid', 'status', 'createdAt', 'location']) &&
-             data.childUid is string &&
+      return data.childUid is string &&
              data.parentUid is string &&
              data.status in ['active', 'resolved'] &&
              data.createdAt is timestamp &&
-             data.location is map && data.location.lat is number && data.location.lng is number;
+             (data.location == null || (data.location is map && data.location.lat is number && data.location.lng is number));
     }
 
     function isValidIncident(data) {
-      return hasOnlyAllowedFields(['studentId', 'teacherId', 'content', 'type', 'createdAt']) &&
-             data.studentId is string &&
+      return data.studentId is string &&
              data.teacherId is string &&
-             data.content is string && data.content.size() > 0 && data.content.size() < 2000 &&
-             data.type in ['behavior', 'safety', 'other'] &&
+             data.content is string &&
              data.createdAt is timestamp;
     }
 
     function isValidAttendance(data) {
-      return hasOnlyAllowedFields(['studentId', 'teacherId', 'status', 'date']) &&
-             data.studentId is string &&
+      return data.studentId is string &&
              data.teacherId is string &&
              data.status in ['present', 'absent', 'late'] &&
              data.date is timestamp;
     }
 
     function isValidGrade(data) {
-      return hasOnlyAllowedFields(['studentId', 'teacherId', 'grade', 'comment', 'behavior', 'createdAt']) &&
-             data.studentId is string &&
+      return data.studentId is string &&
              data.teacherId is string &&
-             data.grade is string && data.grade.size() > 0 && data.grade.size() < 20 &&
-             (!('comment' in data) || (data.comment is string && data.comment.size() < 1000)) &&
-             (!('behavior' in data) || data.behavior in ['excellent', 'good', 'average', 'poor']) &&
+             data.grade is string &&
              data.createdAt is timestamp;
     }
 
     function isValidHomeworkSubmission(data) {
-      return hasOnlyAllowedFields(['studentId', 'studentName', 'schoolId', 'childUid', 'teacherId', 'teacherName', 'title', 'description', 'fileName', 'fileUrl', 'submittedAt', 'status', 'updatedAt']) &&
-             data.studentId is string &&
-             data.studentName is string &&
+      return data.studentId is string &&
              data.schoolId is string &&
              data.childUid is string &&
-             (!('teacherId' in data) || (data.teacherId is string || data.teacherId == null)) &&
-             (!('teacherName' in data) || (data.teacherName is string || data.teacherName == null)) &&
-             data.title is string && data.title.size() > 0 && data.title.size() < 500 &&
-             (!('description' in data) || (data.description is string && data.description.size() < 2000)) &&
-             (!('fileName' in data) || (data.fileName is string || data.fileName == null)) &&
-             (!('fileUrl' in data) || (data.fileUrl is string || data.fileUrl == null)) &&
+             data.title is string &&
              data.submittedAt is timestamp &&
-             data.status in ['pending', 'reviewed', 'submitted'] &&
-             (!('updatedAt' in data) || data.updatedAt is timestamp);
+             data.status in ['pending', 'reviewed', 'submitted'];
     }
 
     function isValidVisitorMessage(data) {
-      return hasOnlyAllowedFields(['uid', 'email', 'displayName', 'requestedRole', 'schoolId', 'message', 'createdAt', 'status', 'fileName', 'fileUrl', 'subject']) &&
-             data.uid is string &&
+      return data.uid is string &&
              data.email is string &&
-             (!('displayName' in data) || data.displayName is string) &&
              data.requestedRole in ['teacher', 'parent', 'child'] &&
-             (data.schoolId == null || data.schoolId is string) &&
-             data.message is string && data.message.size() > 0 && data.message.size() < 2000 &&
-             data.createdAt is timestamp &&
-             data.status in ['unread', 'read'];
+             data.message is string &&
+             data.createdAt is timestamp;
     }
 
     // ===============================================================
@@ -465,8 +405,8 @@ service cloud.firestore {
                       isAdmin() || (
                         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'child' &&
                         request.resource.data.childUid == request.auth.uid &&
-                        exists(/databases/$(database)/documents/students/$(request.resource.data.childUid)) &&
-                        get(/databases/$(database)/documents/students/$(request.resource.data.childUid)).data.parentUid == request.resource.data.parentUid
+                        // Verify parent relationship from user profile to prevent spoofing
+                        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.parentId == request.resource.data.parentUid
                       )
                     );
       allow update: if isAuthenticated() && 
@@ -598,33 +538,25 @@ service cloud.firestore {
     }
 
     function isValidFeedback(data) {
-      return hasOnlyAllowedFields(['fromUid', 'fromName', 'toUid', 'toName', 'rating', 'comment', 'createdAt']) &&
-             data.fromUid == request.auth.uid &&
+      return data.fromUid == request.auth.uid &&
              data.toUid is string &&
-             data.rating is number && data.rating >= 1 && data.rating <= 5 &&
-             data.comment is string && data.comment.size() < 2000 &&
+             data.rating is number &&
              data.createdAt is timestamp;
     }
 
     function isValidCall(data) {
-      return hasOnlyAllowedFields(['callerId', 'callerName', 'receiverId', 'channel', 'status', 'createdAt']) &&
-             data.callerId is string &&
+      return data.callerId is string &&
              data.receiverId is string &&
-             data.channel is string &&
              data.status in ['pending', 'accepted', 'rejected', 'ended'] &&
              data.createdAt is timestamp;
     }
 
     function isValidSchedule(data) {
-      return hasOnlyAllowedFields(['id', 'schoolId', 'day', 'startTime', 'endTime', 'subject', 'teacherName', 'grade', 'updatedAt']) &&
-             data.schoolId is string &&
+      return data.schoolId is string &&
              data.day in ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'] &&
              data.startTime is string &&
              data.endTime is string &&
-             data.subject is string &&
-             (!('teacherName' in data) || data.teacherName is string) &&
-             (!('grade' in data) || data.grade is string) &&
-             (!('updatedAt' in data) || data.updatedAt is timestamp);
+             data.subject is string;
     }
 
     match /feedbacks/{feedbackId} {

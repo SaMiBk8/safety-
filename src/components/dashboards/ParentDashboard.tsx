@@ -68,7 +68,19 @@ export const ParentDashboard: React.FC<{ onStartCall?: (channel: string, receive
   useEffect(() => {
     if (!profile?.uid) return;
 
-    // Parent GPS Tracking
+    const q = query(collection(db, 'students'), where('parentUid', '==', profile.uid));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setChildren(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Student)));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'students', user || undefined);
+    });
+    return () => unsubscribe();
+  }, [profile?.uid]);
+
+  // Parent GPS Tracking - Only if children are linked
+  useEffect(() => {
+    if (!profile?.uid || children.length === 0) return;
+
     let watchId: number;
     if ("geolocation" in navigator) {
       watchId = navigator.geolocation.watchPosition(
@@ -86,17 +98,10 @@ export const ParentDashboard: React.FC<{ onStartCall?: (channel: string, receive
       );
     }
 
-    const q = query(collection(db, 'students'), where('parentUid', '==', profile.uid));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setChildren(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Student)));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'students', user || undefined);
-    });
     return () => {
-      unsubscribe();
       if (watchId) navigator.geolocation.clearWatch(watchId);
     };
-  }, [profile?.uid]);
+  }, [profile?.uid, children.length]);
 
   // Listen for SOS Alerts
   useEffect(() => {
@@ -349,81 +354,99 @@ export const ParentDashboard: React.FC<{ onStartCall?: (channel: string, receive
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2 space-y-8">
           {/* Real-time Tracking */}
-          <section className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 font-bold text-slate-900 dark:text-white">
-                <MapPin className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-                Live Location Tracking
+          {children.length > 0 ? (
+            <section className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 font-bold text-slate-900 dark:text-white">
+                  <MapPin className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                  Live Location Tracking
+                </div>
+                <button 
+                  onClick={() => setActiveModal('link-child')}
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-100 dark:shadow-none"
+                >
+                  <Plus className="w-4 h-4" /> Link Child
+                </button>
+              </div>
+              <div className="grid grid-cols-1 gap-6">
+                {children.map(child => (
+                  <div key={child.id} className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm overflow-hidden">
+                    <div className="p-4 border-b border-slate-50 dark:border-slate-800 flex justify-between items-center">
+                      <span className="font-bold text-slate-900 dark:text-white">{child.name}</span>
+                      <span className="text-xs text-emerald-500 font-bold flex items-center gap-1">
+                        <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
+                        Live Now
+                      </span>
+                    </div>
+                    <div className="bg-slate-100 dark:bg-slate-800">
+                      {isLoaded ? (
+                        <GoogleMap
+                          mapContainerStyle={mapContainerStyle}
+                          center={child.location || lastKnownLocations[child.id] || mapCenters[child.id] || { lat: 34.0522, lng: -118.2437 }}
+                          zoom={15}
+                          options={{
+                            disableDefaultUI: true,
+                            zoomControl: true,
+                          }}
+                        >
+                          {(child.location || lastKnownLocations[child.id]) && (
+                            <Marker position={child.location || lastKnownLocations[child.id]} />
+                          )}
+                        </GoogleMap>
+                      ) : (
+                        <div className="h-[300px] flex items-center justify-center text-slate-400 italic text-sm">
+                          Loading Google Maps...
+                        </div>
+                      )}
+                    </div>
+                    <div className="p-4 flex gap-2">
+                      <button 
+                        onClick={() => onStartCall?.(`call_${child.childUid}`, child.childUid, child.name)}
+                        className="flex-1 py-3 bg-blue-600 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2"
+                      >
+                        <Phone className="w-4 h-4" /> Call Child
+                      </button>
+              <button 
+                onClick={() => {
+                  setSelectedContact({ uid: child.childUid, displayName: child.name });
+                  setActiveModal('messenger');
+                }}
+                className="flex-1 py-3 bg-emerald-600 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 relative"
+              >
+                <MessageSquare className="w-4 h-4" /> Message
+              </button>
+                      <button 
+                        onClick={() => {
+                          setSelectedChildForFeedback({ uid: child.childUid, name: child.name });
+                          setActiveModal('feedback');
+                        }}
+                        className="p-3 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-xl hover:bg-slate-200 transition-all"
+                        title="Give Feedback"
+                      >
+                        <MessageSquare className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          ) : (
+            <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 p-12 rounded-[2.5rem] text-center space-y-6">
+              <div className="w-20 h-20 bg-blue-50 dark:bg-blue-900/20 rounded-full flex items-center justify-center mx-auto">
+                <MapPin className="w-10 h-10 text-blue-600" />
+              </div>
+              <div className="max-w-xs mx-auto">
+                <h3 className="text-xl font-black text-slate-900 dark:text-white uppercase tracking-tight mb-2">Setup Tracking</h3>
+                <p className="text-sm text-slate-500">You haven't linked any children yet. Link your child's account to start live location tracking and safety monitoring.</p>
               </div>
               <button 
-                onClick={() => setActiveModal('link-child')}
-                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-100 dark:shadow-none"
+                onClick={() => setIsAddingChild(true)}
+                className="px-8 py-3 bg-blue-600 text-white rounded-xl font-bold shadow-lg shadow-blue-100 dark:shadow-none hover:bg-blue-700 transition-all"
               >
-                <Plus className="w-4 h-4" /> Link Child
+                Link Child Now
               </button>
             </div>
-            <div className="grid grid-cols-1 gap-6">
-              {children.map(child => (
-                <div key={child.id} className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm overflow-hidden">
-                  <div className="p-4 border-b border-slate-50 dark:border-slate-800 flex justify-between items-center">
-                    <span className="font-bold text-slate-900 dark:text-white">{child.name}</span>
-                    <span className="text-xs text-emerald-500 font-bold flex items-center gap-1">
-                      <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
-                      Live Now
-                    </span>
-                  </div>
-                  <div className="bg-slate-100 dark:bg-slate-800">
-                    {isLoaded ? (
-                      <GoogleMap
-                        mapContainerStyle={mapContainerStyle}
-                        center={child.location || lastKnownLocations[child.id] || mapCenters[child.id] || { lat: 34.0522, lng: -118.2437 }}
-                        zoom={15}
-                        options={{
-                          disableDefaultUI: true,
-                          zoomControl: true,
-                        }}
-                      >
-                        {(child.location || lastKnownLocations[child.id]) && (
-                          <Marker position={child.location || lastKnownLocations[child.id]} />
-                        )}
-                      </GoogleMap>
-                    ) : (
-                      <div className="h-[300px] flex items-center justify-center text-slate-400 italic text-sm">
-                        Loading Google Maps...
-                      </div>
-                    )}
-                  </div>
-                  <div className="p-4 flex gap-2">
-                    <button 
-                      onClick={() => onStartCall?.(`call_${child.childUid}`, child.childUid, child.name)}
-                      className="flex-1 py-3 bg-blue-600 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2"
-                    >
-                      <Phone className="w-4 h-4" /> Call Child
-                    </button>
-            <button 
-              onClick={() => {
-                setSelectedContact({ uid: child.childUid, displayName: child.name });
-                setActiveModal('messenger');
-              }}
-              className="flex-1 py-3 bg-emerald-600 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 relative"
-            >
-              <MessageSquare className="w-4 h-4" /> Message
-            </button>
-                    <button 
-                      onClick={() => {
-                        setSelectedChildForFeedback({ uid: child.childUid, name: child.name });
-                        setActiveModal('feedback');
-                      }}
-                      className="p-3 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-xl hover:bg-slate-200 transition-all"
-                      title="Give Feedback"
-                    >
-                      <MessageSquare className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
+          )}
         </div>
 
         <div className="space-y-8">
@@ -514,20 +537,22 @@ export const ParentDashboard: React.FC<{ onStartCall?: (channel: string, receive
           </section>
 
           {/* Child Status */}
-          <section className="bg-emerald-50 dark:bg-emerald-900/10 p-8 rounded-[2.5rem] border border-emerald-100 dark:border-emerald-900/20">
-            <h3 className="text-lg font-bold text-emerald-900 dark:text-emerald-100 mb-4">Child Status</h3>
-            <div className="space-y-4">
-              {children.map(child => (
-                <div key={child.id} className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-2 h-2 bg-emerald-500 rounded-full" />
-                    <span className="text-sm font-bold text-slate-700 dark:text-slate-300">{child.name}</span>
+          {children.length > 0 && (
+            <section className="bg-emerald-50 dark:bg-emerald-900/10 p-8 rounded-[2.5rem] border border-emerald-100 dark:border-emerald-900/20">
+              <h3 className="text-lg font-bold text-emerald-900 dark:text-emerald-100 mb-4">Child Status</h3>
+              <div className="space-y-4">
+                {children.map(child => (
+                  <div key={child.id} className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-2 h-2 bg-emerald-500 rounded-full" />
+                      <span className="text-sm font-bold text-slate-700 dark:text-slate-300">{child.name}</span>
+                    </div>
+                    <span className="text-[10px] font-black text-emerald-600 dark:text-emerald-400 uppercase">At School</span>
                   </div>
-                  <span className="text-[10px] font-black text-emerald-600 dark:text-emerald-400 uppercase">At School</span>
-                </div>
-              ))}
-            </div>
-          </section>
+                ))}
+              </div>
+            </section>
+          )}
         </div>
       </div>
 

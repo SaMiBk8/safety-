@@ -35,6 +35,11 @@ interface Student {
   parentUid: string;
   childUid: string;
   teacherIds: string[];
+  location?: {
+    lat: number;
+    lng: number;
+    lastUpdated: any;
+  };
 }
 
 interface Announcement {
@@ -148,6 +153,30 @@ export const ChildDashboard: React.FC<{ onStartCall?: (channel: string, receiver
   useEffect(() => {
     if (!studentData?.id) return;
 
+    // Continuous location tracking
+    let watchId: number | null = null;
+    
+    if ("geolocation" in navigator) {
+      watchId = navigator.geolocation.watchPosition(
+        async (position) => {
+          const { latitude, longitude } = position.coords;
+          try {
+            await updateDoc(doc(db, 'students', studentData.id), {
+              location: {
+                lat: latitude,
+                lng: longitude,
+                lastUpdated: serverTimestamp()
+              }
+            });
+          } catch (error) {
+            console.error("Error updating tracking location:", error);
+          }
+        },
+        (error) => console.log("Tracking location error:", error),
+        { enableHighAccuracy: true, timeout: 20000, maximumAge: 10000 }
+      );
+    }
+
     const unsubAssignments = onSnapshot(
       query(collection(db, 'assignments'), where('schoolId', '==', studentData.schoolId)),
       (snapshot) => setAssignments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })))
@@ -169,6 +198,7 @@ export const ChildDashboard: React.FC<{ onStartCall?: (channel: string, receiver
     );
 
     return () => {
+      if (watchId !== null) navigator.geolocation.clearWatch(watchId);
       unsubAssignments();
       unsubQuran();
       unsubSports();
@@ -190,10 +220,66 @@ export const ChildDashboard: React.FC<{ onStartCall?: (channel: string, receiver
   };
 
   const triggerSOS = async () => {
-    if (!user?.uid || !studentData?.parentUid) return;
+    if (!user?.uid || !studentData?.parentUid) {
+      toast.error("Emergency: Profile not loaded. Cannot trigger SOS.");
+      return;
+    }
+
     setIsSOSActive(true);
-    toast.error("SOS Triggered! Notifying parents...");
-    setTimeout(() => setIsSOSActive(false), 10000);
+    const sosToast = toast.loading("🚨 TRIGGERING SOS EMERGENCY...", {
+      description: "Connecting to parent and pinpointing location..."
+    });
+
+    try {
+      // 1. Get current precise position
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, { 
+          enableHighAccuracy: true,
+          timeout: 10000
+        });
+      }).catch(err => {
+        console.warn("Could not get high accuracy location:", err);
+        return null;
+      });
+
+      const locationData = position ? {
+        lat: position.coords.latitude,
+        lng: position.coords.longitude
+      } : null;
+
+      // 2. Create SOS Alert document
+      await addDoc(collection(db, 'sos_alerts'), {
+        childUid: user.uid,
+        childName: studentData.name || user.displayName || 'Unknown Child',
+        parentUid: studentData.parentUid,
+        location: locationData,
+        status: 'active',
+        createdAt: serverTimestamp()
+      });
+
+      // 3. Immediate student update if location is available
+      if (locationData) {
+        await updateDoc(doc(db, 'students', studentData.id), {
+          location: {
+            ...locationData,
+            lastUpdated: serverTimestamp()
+          }
+        });
+      }
+
+      toast.success("SOS SENT! Your parent has been notified.", {
+        id: sosToast,
+        duration: 10000
+      });
+    } catch (error) {
+      console.error("SOS trigger error:", error);
+      handleFirestoreError(error, OperationType.CREATE, 'sos_alerts', user || undefined);
+      toast.error("Failed to send SOS. Please call your parent!", { id: sosToast });
+      setIsSOSActive(false);
+    }
+
+    // Keep visual active for 30s
+    setTimeout(() => setIsSOSActive(false), 30000);
   };
 
   const handleHomeworkSubmit = async () => {

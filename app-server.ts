@@ -41,40 +41,27 @@ async function startServer() {
       return res.json({ token: null });
     }
 
-    // Use a standard 1-hour expiration but with a generous buffer
+    // Use a standard 1-hour expiration
     const expirationTimeInSeconds = 3600; 
     const currentTimestamp = Math.floor(Date.now() / 1000);
-    // Add a 24-hour buffer to privilegeExpiredTs to handle clock skew and long sessions
-    const privilegeExpiredTs = currentTimestamp + expirationTimeInSeconds + 86400; 
+    // absolute timestamp when the privilege expires
+    const privilegeExpiredTs = currentTimestamp + expirationTimeInSeconds; 
     
-    console.log(`Generating token: Channel=${channelName}, AppID=${appId.substring(0, 5)}..., Time=${currentTimestamp}, Expiry=${privilegeExpiredTs}`);
+    console.log(`Generating Agora Token: Channel=${channelName}, AppID=${appId.substring(0, 5)}..., Time=${currentTimestamp}, Expiry=${privilegeExpiredTs}`);
 
     try {
       let token;
       
-      // Use the most stable method for the installed version of agora-token (v2.x)
-      try {
-        // In v2.x, buildTokenWithUid takes absolute timestamps.
-        token = RtcTokenBuilder.buildTokenWithUid(
-          appId,
-          appCertificate,
-          channelName,
-          0, // uid = 0 means any UID
-          RtcRole.PUBLISHER,
-          privilegeExpiredTs, // token expiration
-          privilegeExpiredTs  // privilege expiration
-        );
-      } catch (e) {
-        console.warn('Primary token generation failed, trying fallback:', e);
-        token = (RtcTokenBuilder as any).buildTokenWithUid(
-          appId,
-          appCertificate,
-          channelName,
-          0,
-          RtcRole.PUBLISHER,
-          privilegeExpiredTs
-        );
-      }
+      // In v2.x, buildTokenWithUid takes absolute timestamps.
+      token = RtcTokenBuilder.buildTokenWithUid(
+        appId,
+        appCertificate,
+        channelName,
+        0, // uid = 0 means any UID
+        RtcRole.PUBLISHER,
+        privilegeExpiredTs, // token expiration
+        privilegeExpiredTs  // privilege expiration
+      );
 
       if (!token) {
         throw new Error('Token builder returned empty result');
