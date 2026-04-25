@@ -248,6 +248,17 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "schoolId", "day", "startTime", "endTime", "subject"]
+    },
+    "GlobalAnnouncement": {
+      "title": "Global Announcement",
+      "description": "System-wide announcements from developers",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "content", "createdAt"]
     }
   },
   "firestore": {
@@ -310,6 +321,10 @@
     "/schedules/{scheduleId}": {
       "schema": "Schedule",
       "description": "School schedules"
+    },
+    "/global_announcements/{annId}": {
+      "schema": "GlobalAnnouncement",
+      "description": "System-wide announcements"
     }
   }
 }

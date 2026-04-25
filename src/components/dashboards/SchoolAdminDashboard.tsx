@@ -30,16 +30,15 @@ interface VisitorMessage {
 
 export const SchoolAdminDashboard: React.FC = () => {
   const { user, profile } = useAuth();
-  const [activeTab, setActiveTab] = useState<'announcements' | 'staff' | 'students' | 'requests' | 'messenger' | 'feedback' | 'submissions' | 'schedules'>('announcements');
+  const [activeTab, setActiveTab] = useState<'announcements' | 'staff' | 'students' | 'requests' | 'messenger' | 'submissions' | 'schedules'>('announcements');
   const [selectedContactForFeedback, setSelectedContactForFeedback] = useState<{ uid: string, name: string } | null>(null);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [globalAnnouncements, setGlobalAnnouncements] = useState<any[]>([]);
   const [schedules, setSchedules] = useState<any[]>([]);
   const [staff, setStaff] = useState<UserProfile[]>([]);
   const [parents, setParents] = useState<UserProfile[]>([]);
   const [students, setStudents] = useState<any[]>([]);
   const [submissions, setSubmissions] = useState<any[]>([]);
-  const [feedbacks, setFeedbacks] = useState<any[]>([]);
-  const [deletingFeedbackId, setDeletingFeedbackId] = useState<string | null>(null);
   const [requests, setRequests] = useState<VisitorMessage[]>([]);
   const [selectedContact, setSelectedContact] = useState<UserProfile | null>(null);
   const [newTitle, setNewTitle] = useState('');
@@ -90,6 +89,13 @@ export const SchoolAdminDashboard: React.FC = () => {
       setAnnouncements(list.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)));
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'announcements', user || undefined);
+    });
+
+    const globalQ = query(collection(db, 'global_announcements'), orderBy('createdAt', 'desc'));
+    const unsubscribeGlobal = onSnapshot(globalQ, (snapshot) => {
+      setGlobalAnnouncements(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data(), isGlobal: true })));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'global_announcements', user || undefined);
     });
 
     const staffQ = query(
@@ -156,26 +162,15 @@ export const SchoolAdminDashboard: React.FC = () => {
       handleFirestoreError(error, OperationType.LIST, 'schedules', user || undefined);
     });
 
-    const feedbackQ = query(
-      collection(db, 'feedbacks'),
-      where('toSchoolId', '==', profile.schoolId),
-      orderBy('createdAt', 'desc')
-    );
-    const unsubscribeFeedback = onSnapshot(feedbackQ, (snapshot) => {
-      setFeedbacks(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'feedbacks', user || undefined);
-    });
-
     return () => {
       unsubscribeAnn();
+      unsubscribeGlobal();
       unsubscribeStaff();
       unsubscribeRequests();
       unsubscribeParents();
       unsubscribeStudents();
       unsubscribeSub();
       unsubscribeSch();
-      unsubscribeFeedback();
     };
   }, [profile?.schoolId]);
 
@@ -253,8 +248,6 @@ export const SchoolAdminDashboard: React.FC = () => {
       { name: 'messages', field: 'receiverId' },
       { name: 'calls', field: 'callerId' },
       { name: 'calls', field: 'receiverId' },
-      { name: 'feedbacks', field: 'fromUid' },
-      { name: 'feedbacks', field: 'toUid' },
       { name: 'schedules', field: 'teacherUid' },
       { name: 'schedules', field: 'teacherId' }
     ];
@@ -430,19 +423,6 @@ export const SchoolAdminDashboard: React.FC = () => {
     }
   };
 
-  const deleteFeedback = async (id: string) => {
-    if (!window.confirm('Are you sure you want to delete this feedback?')) return;
-    setDeletingFeedbackId(id);
-    try {
-      await deleteDoc(doc(db, 'feedbacks', id));
-      toast.success('Feedback deleted successfully');
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `feedbacks/${id}`, user || undefined);
-    } finally {
-      setDeletingFeedbackId(null);
-    }
-  };
-
   const handleAssignTeacher = async (studentId: string, teacherId: string) => {
     try {
       await updateDoc(doc(db, 'students', studentId), {
@@ -599,6 +579,12 @@ export const SchoolAdminDashboard: React.FC = () => {
     document.body.removeChild(link);
   };
 
+  const allAnnouncements = [...globalAnnouncements, ...announcements].sort((a,b) => {
+    const timeA = a.createdAt?.seconds || 0;
+    const timeB = b.createdAt?.seconds || 0;
+    return timeB - timeA;
+  });
+
   return (
     <div className="space-y-8">
       <header className="flex items-center justify-between">
@@ -651,15 +637,6 @@ export const SchoolAdminDashboard: React.FC = () => {
         >
           Students
           {activeTab === 'students' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
-        </button>
-        <button 
-          onClick={() => setActiveTab('feedback')}
-          className={`pb-4 px-2 text-sm font-bold transition-all relative shrink-0 ${
-            activeTab === 'feedback' ? 'text-blue-600' : 'text-slate-400'
-          }`}
-        >
-          Feedback
-          {activeTab === 'feedback' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
         </button>
         <button 
           onClick={() => setActiveTab('submissions')}
@@ -777,31 +754,48 @@ export const SchoolAdminDashboard: React.FC = () => {
           )}
 
           <div className="space-y-4">
-            {announcements.map((ann) => (
-              <div key={ann.id} className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 shadow-sm space-y-4">
+            {allAnnouncements.map((ann) => (
+              <div key={ann.id} className={`p-8 rounded-[2.5rem] border shadow-sm space-y-4 transition-all ${
+                ann.isGlobal 
+                  ? 'bg-blue-600 border-blue-500 text-white hover:bg-blue-700' 
+                  : 'bg-white dark:bg-slate-900 border-slate-100 dark:border-slate-800'
+              }`}>
                 <div className="flex justify-between items-start gap-4">
                   <div className="flex-1">
-                    <h3 className="font-black text-xl text-slate-900 dark:text-white leading-tight">{ann.title}</h3>
+                    <div className="flex items-center gap-2 mb-2">
+                       <span className={`px-2 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider ${
+                         ann.isGlobal ? 'bg-white/20 text-white' : 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
+                       }`}>
+                         {ann.isGlobal ? 'Global Alert' : 'School News'}
+                       </span>
+                    </div>
+                    <h3 className={`font-black text-xl leading-tight ${ann.isGlobal ? 'text-white' : 'text-slate-900 dark:text-white'}`}>{ann.title}</h3>
                   </div>
                   <div className="flex items-center gap-4">
-                    <div className="flex items-center gap-2 text-[10px] text-slate-400 dark:text-slate-500 uppercase font-black">
-                      <Calendar className="w-3 h-3 text-blue-600" />
+                    <div className={`flex items-center gap-2 text-[10px] uppercase font-black ${ann.isGlobal ? 'text-blue-100' : 'text-slate-400 dark:text-slate-500'}`}>
+                      <Clock className="w-3 h-3" />
                       {ann.createdAt?.toDate().toLocaleDateString()}
                     </div>
-                    <button 
-                      onClick={() => handleDeleteAnnouncement(ann.id)}
-                      className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-colors"
-                      title="Delete Announcement"
-                    >
-                      <Trash2 className="w-5 h-5" />
-                    </button>
+                    {!ann.isGlobal && (
+                      <button 
+                        onClick={() => handleDeleteAnnouncement(ann.id)}
+                        className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-colors"
+                        title="Delete Announcement"
+                      >
+                        <Trash2 className="w-5 h-5" />
+                      </button>
+                    )}
                   </div>
                 </div>
                 
-                <p className="text-slate-600 dark:text-slate-400 text-sm leading-relaxed">{ann.content}</p>
+                <p className={`text-sm leading-relaxed ${ann.isGlobal ? 'text-blue-50/80' : 'text-slate-600 dark:text-slate-400'}`}>{ann.content}</p>
                 
                 {ann.deadline && (
-                  <div className="flex items-center gap-2 p-3 bg-red-50 dark:bg-red-900/10 rounded-2xl border border-red-100 dark:border-red-900/20 text-red-600 dark:text-red-400 text-[10px] font-black uppercase">
+                  <div className={`flex items-center gap-2 p-3 rounded-2xl border text-[10px] font-black uppercase ${
+                    ann.isGlobal 
+                      ? 'bg-white/10 border-white/20 text-white' 
+                      : 'bg-red-50 dark:bg-red-900/10 border-red-100 dark:border-red-900/20 text-red-600 dark:text-red-400'
+                  }`}>
                     <Clock className="w-4 h-4" />
                     Auto-Deletes At: {ann.deadline.toDate().toLocaleString()}
                   </div>
@@ -813,10 +807,14 @@ export const SchoolAdminDashboard: React.FC = () => {
                       href={ann.fileUrl} 
                       target="_blank" 
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-3 p-4 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded-2xl text-xs font-black uppercase hover:bg-blue-100 transition-all border border-blue-100 dark:border-blue-800 shadow-sm"
+                      className={`inline-flex items-center gap-3 p-4 rounded-2xl text-xs font-black uppercase transition-all border shadow-sm ${
+                        ann.isGlobal
+                          ? 'bg-white/10 text-white border-white/20 hover:bg-white/20'
+                          : 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 border-blue-100 dark:border-blue-800 hover:bg-blue-100'
+                      }`}
                     >
-                      <div className="p-2 bg-white dark:bg-slate-900 rounded-lg shadow-sm">
-                        <FileText className="w-5 h-5 text-blue-600" />
+                      <div className={`p-2 rounded-lg shadow-sm ${ann.isGlobal ? 'bg-white/10' : 'bg-white dark:bg-slate-900'}`}>
+                        <FileText className="w-5 h-5" />
                       </div>
                       {ann.fileName || 'View Attachment'}
                     </a>
@@ -824,7 +822,7 @@ export const SchoolAdminDashboard: React.FC = () => {
                 )}
               </div>
             ))}
-            {announcements.length === 0 && !isAdding && (
+            {allAnnouncements.length === 0 && !isAdding && (
               <div className="text-center py-12 bg-slate-50 dark:bg-slate-800/50 rounded-3xl border border-dashed border-slate-200 dark:border-slate-800 text-slate-400 dark:text-slate-500">
                 No announcements yet.
               </div>
@@ -1137,77 +1135,6 @@ export const SchoolAdminDashboard: React.FC = () => {
                   <tr>
                     <td colSpan={4} className="p-8 text-center text-slate-400 italic">
                       No students found in this school.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      ) : activeTab === 'feedback' ? (
-        <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm overflow-hidden">
-          <div className="p-6 border-b border-slate-100 dark:border-slate-800">
-            <h3 className="text-xl font-bold text-slate-900 dark:text-white">Community Feedback</h3>
-            <p className="text-sm text-slate-500">View and manage feedback for staff and students</p>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-slate-50 dark:bg-slate-800/50">
-                  <th className="p-4 text-xs font-black text-slate-400 uppercase tracking-widest">From</th>
-                  <th className="p-4 text-xs font-black text-slate-400 uppercase tracking-widest">Target</th>
-                  <th className="p-4 text-xs font-black text-slate-400 uppercase tracking-widest">Rating</th>
-                  <th className="p-4 text-xs font-black text-slate-400 uppercase tracking-widest">Comment</th>
-                  <th className="p-4 text-xs font-black text-slate-400 uppercase tracking-widest">Date</th>
-                  <th className="p-4 text-xs font-black text-slate-400 uppercase tracking-widest">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
-                {feedbacks.map((f) => (
-                  <tr key={f.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition-colors">
-                    <td className="p-4">
-                      <div className="text-sm font-bold text-slate-900 dark:text-white">{f.fromName}</div>
-                      <div className="text-[10px] text-slate-400">ID: {f.fromUid.slice(-6)}</div>
-                    </td>
-                    <td className="p-4">
-                      <div className="text-sm font-bold text-slate-900 dark:text-white">{f.toName}</div>
-                      <div className="text-[10px] text-slate-400">ID: {f.toUid.slice(-6)}</div>
-                    </td>
-                    <td className="p-4">
-                      <div className="flex gap-0.5">
-                        {[1, 2, 3, 4, 5].map((star) => (
-                          <Star key={star} className={`w-3 h-3 ${star <= f.rating ? 'text-amber-400 fill-amber-400' : 'text-slate-200 dark:text-slate-700'}`} />
-                        ))}
-                      </div>
-                    </td>
-                    <td className="p-4 overflow-hidden max-w-[300px]">
-                      <p className="text-xs text-slate-600 dark:text-slate-400 line-clamp-2">{f.comment}</p>
-                    </td>
-                    <td className="p-4 whitespace-nowrap">
-                      <div className="text-[10px] text-slate-400 uppercase font-black">
-                        {f.createdAt?.toDate().toLocaleDateString()}
-                        <div className="text-[9px] opacity-60">{f.createdAt?.toDate().toLocaleTimeString()}</div>
-                      </div>
-                    </td>
-                    <td className="p-4">
-                      <button 
-                        onClick={() => deleteFeedback(f.id)}
-                        disabled={deletingFeedbackId === f.id}
-                        className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-all disabled:opacity-50"
-                      >
-                        {deletingFeedbackId === f.id ? (
-                          <div className="w-5 h-5 border-2 border-red-500/30 border-t-red-500 rounded-full animate-spin" />
-                        ) : (
-                          <Trash2 className="w-5 h-5" />
-                        )}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-                {feedbacks.length === 0 && (
-                  <tr>
-                    <td colSpan={6} className="p-12 text-center text-slate-400 italic">
-                      No feedback records found for this school.
                     </td>
                   </tr>
                 )}

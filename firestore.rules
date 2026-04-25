@@ -114,13 +114,13 @@ service cloud.firestore {
     function isPrimaryAdmin() {
       return isAuthenticated() && 
              ('email' in request.auth.token) &&
-             (request.auth.token.email.lower() == "bsami0004bsami@gmail.com" || 
-              request.auth.token.email.lower() == "bsami04bsami@gmail.com" || 
-              request.auth.token.email.lower() == "www.samibook43@gmail.com" || 
-              request.auth.token.email.lower() == "sbou91752@gmail.com" ||
-              request.auth.token.email.lower() == "mycat00101@gmail.com" ||
-              request.auth.token.email.lower() == "sami.boukheche.etu@centre-univ-mila.dz" ||
-              request.auth.token.email.lower() == "samiboo8324@gmail.com");
+             (request.auth.token.email.toLower() == "bsami0004bsami@gmail.com" || 
+              request.auth.token.email.toLower() == "bsami04bsami@gmail.com" || 
+              request.auth.token.email.toLower() == "www.samibook43@gmail.com" || 
+              request.auth.token.email.toLower() == "sbou91752@gmail.com" ||
+              request.auth.token.email.toLower() == "mycat00101@gmail.com" ||
+              request.auth.token.email.toLower() == "sami.boukheche.etu@centre-univ-mila.dz" ||
+              request.auth.token.email.toLower() == "samiboo8324@gmail.com");
     }
 
     function isAdmin() {
@@ -546,6 +546,12 @@ service cloud.firestore {
              (!('toSchoolId' in data) || data.toSchoolId is string);
     }
 
+    function isValidGlobalAnnouncement(data) {
+      return data.title is string &&
+             data.content is string &&
+             data.createdAt is timestamp;
+    }
+
     function isValidCall(data) {
       return data.callerId is string &&
              data.receiverId is string &&
@@ -561,26 +567,15 @@ service cloud.firestore {
              data.subject is string;
     }
 
+    match /global_announcements/{annId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAdmin() && isValidGlobalAnnouncement(request.resource.data);
+    }
+
     match /feedbacks/{feedbackId} {
-      allow read: if isAdmin() || (
-        isAuthenticated() && 
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'school_admin' &&
-        (
-          resource.data.fromSchoolId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.schoolId ||
-          resource.data.toSchoolId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.schoolId
-        )
-      );
+      allow read: if isAdmin();
       allow create: if isAuthenticated() && isValidFeedback(request.resource.data);
-      allow delete: if isAdmin() || (
-        isAuthenticated() && 
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'school_admin' &&
-        (
-          resource.data.fromSchoolId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.schoolId ||
-          resource.data.toSchoolId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.schoolId
-        )
-      );
+      allow delete: if isAdmin();
     }
 
     match /calls/{callId} {

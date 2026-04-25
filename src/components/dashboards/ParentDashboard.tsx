@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { collection, query, where, onSnapshot, doc, updateDoc, getDoc, getDocs, arrayUnion, serverTimestamp, addDoc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, updateDoc, getDoc, getDocs, arrayUnion, serverTimestamp, addDoc, orderBy } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useAuth } from '../../context/AuthContext';
 import { Student, Announcement, SOSAlert, UserProfile } from '../../types';
 import { GoogleMap, useJsApiLoader, Marker } from '@react-google-maps/api';
 import { motion, AnimatePresence } from 'motion/react';
-import { MapPin, Bell, Phone, ShieldAlert, BookOpen, Calendar, X, MessageSquare, Plus, Info } from 'lucide-react';
+import { MapPin, Bell, Phone, ShieldAlert, BookOpen, Calendar, X, MessageSquare, Plus, Info, FileText, Clock } from 'lucide-react';
 import { handleFirestoreError, OperationType } from '../../lib/firestore-errors';
 
 const mapContainerStyle = { width: '100%', height: '300px' };
@@ -22,6 +22,7 @@ export const ParentDashboard: React.FC<{ onStartCall?: (channel: string, receive
   const { user, profile } = useAuth();
   const [children, setChildren] = useState<Student[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [globalAnnouncements, setGlobalAnnouncements] = useState<any[]>([]);
   const [schedules, setSchedules] = useState<any[]>([]);
   const [activeAlerts, setActiveAlerts] = useState<SOSAlert[]>([]);
   const [activeModal, setActiveModal] = useState<'messenger' | 'feedback' | 'link-child' | null>(null);
@@ -144,6 +145,17 @@ export const ParentDashboard: React.FC<{ onStartCall?: (channel: string, receive
     return () => unsubscribe();
   }, [profile?.uid]);
 
+  // Listen for global announcements
+  useEffect(() => {
+    const q = query(collection(db, 'global_announcements'), orderBy('createdAt', 'desc'));
+    const unsubscribeGlobal = onSnapshot(q, (snapshot) => {
+      setGlobalAnnouncements(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data(), isGlobal: true })));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'global_announcements', user || undefined);
+    });
+    return () => unsubscribeGlobal();
+  }, [user]);
+
   // Listen for announcements
   useEffect(() => {
     if (children.length === 0) return;
@@ -240,6 +252,12 @@ export const ParentDashboard: React.FC<{ onStartCall?: (channel: string, receive
       setAddChildStatus({ type: 'error', message: 'Failed to link child. Please try again.' });
     }
   };
+
+  const allAnnouncements = [...globalAnnouncements, ...announcements].sort((a,b) => {
+    const timeA = a.createdAt?.toMillis() || 0;
+    const timeB = b.createdAt?.toMillis() || 0;
+    return timeB - timeA;
+  });
 
   return (
     <div className="space-y-8">
@@ -454,28 +472,36 @@ export const ParentDashboard: React.FC<{ onStartCall?: (channel: string, receive
           <section className="space-y-4">
             <div className="flex items-center gap-2 font-bold text-slate-900 dark:text-white">
               <Bell className="w-5 h-5 text-amber-500" />
-              School Updates
+              Latest Updates
             </div>
             <div className="space-y-3">
-              {announcements.map(ann => (
+              {allAnnouncements.map(ann => (
                 <motion.div 
                   initial={{ opacity: 0, x: 20 }}
                   animate={{ opacity: 1, x: 0 }}
                   key={ann.id} 
-                  className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-sm cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group"
+                  className={`p-4 rounded-2xl border shadow-sm cursor-pointer transition-all group ${
+                    ann.isGlobal 
+                      ? 'bg-blue-600 border-blue-500 text-white hover:bg-blue-700' 
+                      : 'bg-white dark:bg-slate-900 border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50'
+                  }`}
                   onClick={() => setSelectedAnnouncement(ann)}
                 >
                   <div className="flex justify-between items-start gap-2">
-                    <h4 className="font-bold text-sm text-slate-900 dark:text-white group-hover:text-blue-600 transition-colors">{ann.title}</h4>
-                    <Info className="w-4 h-4 text-slate-300 group-hover:text-blue-600 transition-colors shrink-0" />
+                    <div className="flex items-center gap-2">
+                      {ann.isGlobal && <span className="px-1.5 py-0.5 bg-white/20 text-[8px] font-black uppercase rounded">Global</span>}
+                      <h4 className={`font-bold text-sm ${ann.isGlobal ? 'text-white' : 'text-slate-900 dark:text-white group-hover:text-blue-600'}`}>{ann.title}</h4>
+                    </div>
+                    <Info className={`w-4 h-4 ${ann.isGlobal ? 'text-white/40' : 'text-slate-300 group-hover:text-blue-600'} shrink-0`} />
                   </div>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2 mt-1">{ann.content}</p>
-                  <div className="mt-2 text-[10px] text-slate-400 dark:text-slate-500 flex items-center gap-1">
-                    <Calendar className="w-3 h-3" />
+                  <p className={`text-xs line-clamp-2 mt-1 ${ann.isGlobal ? 'text-blue-50/80' : 'text-slate-500 dark:text-slate-400'}`}>{ann.content}</p>
+                  <div className={`mt-2 text-[10px] flex items-center gap-1 ${ann.isGlobal ? 'text-white/60' : 'text-slate-400 dark:text-slate-500'}`}>
+                    <Clock className="w-3 h-3" />
                     {ann.createdAt?.toDate().toLocaleDateString()}
                   </div>
                 </motion.div>
               ))}
+              {allAnnouncements.length === 0 && <p className="text-center py-10 text-slate-400 italic text-xs">No updates yet.</p>}
             </div>
           </section>
 

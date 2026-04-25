@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { collection, onSnapshot, doc, updateDoc, query, orderBy, deleteDoc, setDoc, arrayUnion, serverTimestamp, getDocs, where } from 'firebase/firestore';
+import { collection, onSnapshot, doc, updateDoc, query, orderBy, deleteDoc, setDoc, arrayUnion, serverTimestamp, getDocs, where, addDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useAuth } from '../../context/AuthContext';
 import { UserProfile, School } from '../../types';
@@ -28,11 +28,14 @@ export const SystemAdminDashboard: React.FC = () => {
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [messages, setMessages] = useState<VisitorMessage[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeTab, setActiveTab] = useState<'users' | 'pending' | 'messages' | 'schools' | 'relationships' | 'feedbacks' | 'private_chat'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'pending' | 'messages' | 'schools' | 'relationships' | 'feedbacks' | 'announcements' | 'private_chat'>('users');
   const [schools, setSchools] = useState<School[]>([]);
   const [feedbacks, setFeedbacks] = useState<any[]>([]);
+  const [globalAnnouncements, setGlobalAnnouncements] = useState<any[]>([]);
   const [isAddingSchool, setIsAddingSchool] = useState(false);
   const [newSchool, setNewSchool] = useState({ name: '', address: '', adminEmail: '' });
+  const [isAddingGlobalAnn, setIsAddingGlobalAnn] = useState(false);
+  const [newGlobalAnn, setNewGlobalAnn] = useState({ title: '', content: '' });
   const [isCreatingSchool, setIsCreatingSchool] = useState(false);
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
   const [isDeletingSelected, setIsDeletingSelected] = useState(false);
@@ -91,11 +94,19 @@ export const SystemAdminDashboard: React.FC = () => {
       handleFirestoreError(error, OperationType.LIST, 'feedbacks', user || undefined);
     });
 
+    const globalAnnQ = query(collection(db, 'global_announcements'), orderBy('createdAt', 'desc'));
+    const unsubscribeGlobalAnn = onSnapshot(globalAnnQ, (snapshot) => {
+      setGlobalAnnouncements(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'global_announcements', user || undefined);
+    });
+
     return () => {
       unsubscribe();
       unsubscribeMessages();
       unsubscribeSchools();
       unsubscribeFeedbacks();
+      unsubscribeGlobalAnn();
     };
   }, []);
 
@@ -416,6 +427,35 @@ export const SystemAdminDashboard: React.FC = () => {
     }
   };
 
+  const handleCreateGlobalAnn = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newGlobalAnn.title || !newGlobalAnn.content) return;
+    try {
+      await addDoc(collection(db, 'global_announcements'), {
+        title: newGlobalAnn.title,
+        content: newGlobalAnn.content,
+        authorId: user?.uid,
+        authorName: user?.displayName || 'System Admin',
+        createdAt: serverTimestamp()
+      });
+      setNewGlobalAnn({ title: '', content: '' });
+      setIsAddingGlobalAnn(false);
+      toast.success('Global announcement posted!');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'global_announcements', user || undefined);
+    }
+  };
+
+  const deleteGlobalAnn = async (id: string) => {
+    if (!window.confirm('Delete this global announcement?')) return;
+    try {
+      await deleteDoc(doc(db, 'global_announcements', id));
+      toast.success('Announcement deleted.');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `global_announcements/${id}`, user || undefined);
+    }
+  };
+
   const filteredUsers = users.filter(u => 
     u.email.toLowerCase().includes(searchTerm.toLowerCase()) || 
     u.displayName?.toLowerCase().includes(searchTerm.toLowerCase())
@@ -525,6 +565,24 @@ export const SystemAdminDashboard: React.FC = () => {
         >
           Relationships
           {activeTab === 'relationships' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
+        </button>
+        <button 
+          onClick={() => setActiveTab('feedbacks')}
+          className={`pb-4 px-2 text-sm font-bold transition-all relative flex items-center gap-2 shrink-0 ${
+            activeTab === 'feedbacks' ? 'text-blue-600' : 'text-slate-400'
+          }`}
+        >
+          User Feedback
+          {activeTab === 'feedbacks' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
+        </button>
+        <button 
+          onClick={() => setActiveTab('announcements')}
+          className={`pb-4 px-2 text-sm font-bold transition-all relative flex items-center gap-2 shrink-0 ${
+            activeTab === 'announcements' ? 'text-blue-600' : 'text-slate-400'
+          }`}
+        >
+          Global Announcements
+          {activeTab === 'announcements' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
         </button>
         <button 
           onClick={() => setActiveTab('private_chat')}
@@ -939,7 +997,7 @@ export const SystemAdminDashboard: React.FC = () => {
             <div className="text-center py-20 text-slate-400 italic">No visitor requests yet.</div>
           )}
         </div>
-      ) : (
+      ) : activeTab === 'schools' ? (
         <div className="space-y-6">
           <div className="flex justify-between items-center">
             <h3 className="font-bold text-slate-900 dark:text-white">Registered Schools ({schools.length})</h3>
@@ -1030,7 +1088,220 @@ export const SystemAdminDashboard: React.FC = () => {
             })}
           </div>
         </div>
-      )}
+      ) : activeTab === 'relationships' ? (
+        <div className="space-y-6">
+          <div className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 shadow-sm">
+            <h3 className="text-xl font-black text-slate-900 dark:text-white mb-6 uppercase tracking-tight">Link Parent to Child</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-slate-400 uppercase px-1">Parent Email</label>
+                <input 
+                  type="email" 
+                  id="linkParentEmail"
+                  placeholder="parent@email.com" 
+                  className="w-full px-6 py-4 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-slate-400 uppercase px-1">Child Email</label>
+                <input 
+                  type="email" 
+                  id="linkChildEmail"
+                  placeholder="child@email.com" 
+                  className="w-full px-6 py-4 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
+                />
+              </div>
+            </div>
+            <button 
+              onClick={async () => {
+                const pEmail = (document.getElementById('linkParentEmail') as HTMLInputElement).value.toLowerCase();
+                const cEmail = (document.getElementById('linkChildEmail') as HTMLInputElement).value.toLowerCase();
+                if (!pEmail || !cEmail) return;
+
+                try {
+                  const pUser = users.find(u => u.email.toLowerCase() === pEmail && u.role === 'parent');
+                  const cUser = users.find(u => u.email.toLowerCase() === cEmail && u.role === 'child');
+
+                  if (!pUser || !cUser) {
+                    toast.error('Parent or Child not found with these emails and roles.');
+                    return;
+                  }
+
+                  await updateDoc(doc(db, 'users', pUser.uid), {
+                    childIds: arrayUnion(cUser.uid),
+                    updatedAt: serverTimestamp()
+                  });
+
+                  await updateDoc(doc(db, 'users', cUser.uid), {
+                    parentId: pUser.uid,
+                    updatedAt: serverTimestamp()
+                  });
+
+                  await ensureStudentRecord(cUser.uid, cUser.displayName || cUser.email, cUser.schoolId || '', pUser.uid);
+                  toast.success(`Successfully linked ${pUser.displayName} to ${cUser.displayName}`);
+                } catch (error) {
+                  handleFirestoreError(error, OperationType.UPDATE, 'users', user || undefined);
+                }
+              }}
+              className="mt-6 w-full py-4 bg-blue-600 text-white rounded-2xl font-black text-sm uppercase tracking-widest hover:bg-blue-700 transition-all shadow-lg shadow-blue-100"
+            >
+              Verify & Link Account
+            </button>
+          </div>
+        </div>
+      ) : activeTab === 'feedbacks' ? (
+        <div className="space-y-6">
+          <div className="flex justify-between items-center bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm">
+            <div>
+              <h3 className="font-bold text-slate-900 dark:text-white">User Feedbacks ({feedbacks.length})</h3>
+              <p className="text-xs text-slate-500">Global oversight of platform ratings</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {feedbacks.map((fb) => (
+              <div key={fb.id} className="bg-white dark:bg-slate-900 p-6 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 shadow-sm space-y-4">
+                <div className="flex justify-between items-start">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-blue-50 dark:bg-blue-900/40 rounded-xl flex items-center justify-center text-blue-600 font-bold">
+                      {fb.fromName?.[0] || 'F'}
+                    </div>
+                    <div>
+                      <div className="text-sm font-bold text-slate-900 dark:text-white">{fb.fromName}</div>
+                      <div className="text-[10px] text-slate-500">to {fb.toName}</div>
+                    </div>
+                  </div>
+                  <div className="flex gap-1 group">
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <Shield key={star} className={`w-3 h-3 ${star <= fb.rating ? 'text-amber-400 fill-amber-400' : 'text-slate-100 dark:text-slate-800'}`} />
+                    ))}
+                  </div>
+                </div>
+                <p className="text-xs text-slate-600 dark:text-slate-400 line-clamp-3 italic">"{fb.comment}"</p>
+                <div className="flex items-center justify-between pt-2 border-t border-slate-50 dark:border-slate-800">
+                  <div className="text-[10px] text-slate-400 flex items-center gap-1">
+                    <Clock className="w-3 h-3" />
+                    {fb.createdAt?.toDate().toLocaleDateString()}
+                  </div>
+                  <div className="flex gap-2">
+                    <button 
+                      onClick={() => setSelectedFeedback(fb)}
+                      className="p-1.5 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
+                    >
+                      <Info className="w-4 h-4" />
+                    </button>
+                    <button 
+                      onClick={async () => {
+                        if (!window.confirm("Delete this feedback?")) return;
+                        try {
+                          await deleteDoc(doc(db, 'feedbacks', fb.id));
+                          toast.success('Feedback deleted');
+                        } catch (e) {
+                          handleFirestoreError(e, OperationType.DELETE, `feedbacks/${fb.id}`, user || undefined);
+                        }
+                      }}
+                      className="p-1.5 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+            {feedbacks.length === 0 && (
+              <div className="col-span-full py-20 text-center text-slate-400 italic">No feedback entries found.</div>
+            )}
+          </div>
+        </div>
+      ) : activeTab === 'announcements' ? (
+        <div className="space-y-6">
+          <div className="flex justify-between items-center bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm">
+            <div>
+              <h3 className="font-bold text-slate-900 dark:text-white">Global Announcements ({globalAnnouncements.length})</h3>
+              <p className="text-xs text-slate-500">Send system-wide alerts to all schools and users</p>
+            </div>
+            <button 
+              onClick={() => setIsAddingGlobalAnn(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 transition-colors"
+            >
+              <Plus className="w-4 h-4" /> New Platform Alert
+            </button>
+          </div>
+
+          {isAddingGlobalAnn && (
+            <motion.form 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              onSubmit={handleCreateGlobalAnn}
+              className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border border-blue-100 dark:border-slate-800 shadow-xl space-y-4"
+            >
+              <h4 className="font-black text-slate-900 dark:text-white uppercase tracking-tighter">Draft Global Announcement</h4>
+              <input 
+                type="text" 
+                placeholder="Announcement Title" 
+                className="w-full px-6 py-4 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white font-bold"
+                value={newGlobalAnn.title}
+                onChange={(e) => setNewGlobalAnn({...newGlobalAnn, title: e.target.value})}
+                required
+              />
+              <textarea 
+                placeholder="Enter alert content here..." 
+                className="w-full px-6 py-4 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white min-h-[150px]"
+                value={newGlobalAnn.content}
+                onChange={(e) => setNewGlobalAnn({...newGlobalAnn, content: e.target.value})}
+                required
+              />
+              <div className="flex justify-end gap-3 pt-2">
+                <button 
+                  type="button" 
+                  onClick={() => setIsAddingGlobalAnn(false)}
+                  className="px-6 py-3 text-slate-500 font-bold"
+                >
+                  Discard
+                </button>
+                <button 
+                  type="submit"
+                  className="px-8 py-3 bg-blue-600 text-white rounded-2xl font-black uppercase tracking-widest text-sm hover:bg-blue-700 transition-all shadow-lg shadow-blue-100"
+                >
+                  Post to All Users
+                </button>
+              </div>
+            </motion.form>
+          )}
+
+          <div className="space-y-4">
+            {globalAnnouncements.map((ann) => (
+              <motion.div 
+                layoutId={ann.id}
+                key={ann.id} 
+                className="bg-white dark:bg-slate-900 p-8 rounded-[3rem] border border-slate-100 dark:border-slate-800 shadow-sm flex justify-between items-start group hover:border-blue-100 transition-all"
+              >
+                <div className="flex-1 space-y-3">
+                  <div className="flex items-center gap-3">
+                    <span className="px-3 py-1 bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest rounded-full shadow-sm">Platform Alert</span>
+                    <span className="text-[10px] font-bold text-slate-400 flex items-center gap-1">
+                      <Clock className="w-3 h-3" />
+                      {ann.createdAt?.toDate().toLocaleString()}
+                    </span>
+                  </div>
+                  <h4 className="text-xl font-black text-slate-900 dark:text-white">{ann.title}</h4>
+                  <p className="text-slate-600 dark:text-slate-400 leading-relaxed">{ann.content}</p>
+                </div>
+                <button 
+                  onClick={() => deleteGlobalAnn(ann.id)}
+                  className="p-3 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-2xl transition-colors opacity-group-hover:opacity-100"
+                >
+                  <Trash2 className="w-6 h-6" />
+                </button>
+              </motion.div>
+            ))}
+            {globalAnnouncements.length === 0 && (
+              <div className="text-center py-20 bg-slate-50 dark:bg-slate-800/30 rounded-[3rem] border-2 border-dashed border-slate-200 dark:border-slate-800 text-slate-400 italic">
+                No global announcements have been posted.
+              </div>
+            )}
+          </div>
+        </div>
+      ) : null}
       {/* Cleanup Confirmation Modal */}
       <AnimatePresence>
         {showCleanupConfirm && (

@@ -34,6 +34,7 @@ export const TeacherDashboard: React.FC = () => {
   const [selectedContact, setSelectedContact] = useState<{ uid: string, displayName: string } | null>(null);
   const [submissions, setSubmissions] = useState<any[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [globalAnnouncements, setGlobalAnnouncements] = useState<any[]>([]);
   const [sentFeedbacks, setSentFeedbacks] = useState<any[]>([]);
   const [viewMode, setViewMode] = useState<'my' | 'all'>('all');
   const [teacherSubject, setTeacherSubject] = useState(profile?.subject || '');
@@ -69,7 +70,18 @@ export const TeacherDashboard: React.FC = () => {
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'announcements', user || undefined);
     });
-    return () => unsubscribe();
+
+    const globalQ = query(collection(db, 'global_announcements'), orderBy('createdAt', 'desc'));
+    const unsubscribeGlobal = onSnapshot(globalQ, (snapshot) => {
+      setGlobalAnnouncements(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data(), isGlobal: true })));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'global_announcements', user || undefined);
+    });
+
+    return () => {
+      unsubscribe();
+      unsubscribeGlobal();
+    };
   }, [profile?.schoolId]);
 
   useEffect(() => {
@@ -374,6 +386,12 @@ export const TeacherDashboard: React.FC = () => {
     link.click();
     document.body.removeChild(link);
   };
+
+  const allAnnouncements = [...globalAnnouncements, ...announcements].sort((a,b) => {
+    const timeA = a.createdAt?.toMillis() || 0;
+    const timeB = b.createdAt?.toMillis() || 0;
+    return timeB - timeA;
+  });
 
   return (
     <div className="space-y-8">
@@ -761,37 +779,52 @@ export const TeacherDashboard: React.FC = () => {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 text-slate-900 dark:text-white font-bold text-xl">
               <Megaphone className="w-6 h-6 text-blue-600" />
-              School Announcements
+              Latest Announcements
             </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {announcements.map((ann) => (
-              <div key={ann.id} className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm transition-all hover:shadow-md">
-                <h3 className="font-bold text-slate-900 dark:text-white mb-2">{ann.title}</h3>
-                <p className="text-slate-600 dark:text-slate-400 text-sm leading-relaxed mb-4">{ann.content}</p>
+            {allAnnouncements.map((ann) => (
+              <div key={ann.id} className={`p-6 rounded-[2.5rem] border shadow-sm transition-all hover:shadow-md ${
+                ann.isGlobal 
+                  ? 'bg-blue-600 border-blue-500 text-white hover:bg-blue-700' 
+                  : 'bg-white dark:bg-slate-900 border-slate-100 dark:border-slate-800'
+              }`}>
+                <div className="flex items-center justify-between mb-4">
+                  <span className={`px-2 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider ${
+                    ann.isGlobal ? 'bg-white/20 text-white' : 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
+                  }`}>
+                    {ann.isGlobal ? 'Global Alert' : 'School News'}
+                  </span>
+                  <div className={`flex items-center gap-2 text-[10px] ${ann.isGlobal ? 'text-blue-100' : 'text-slate-400'}`}>
+                    <Clock className="w-3 h-3" />
+                    {ann.createdAt?.toDate().toLocaleDateString()}
+                  </div>
+                </div>
+                <h3 className={`font-black text-xl mb-2 ${ann.isGlobal ? 'text-white' : 'text-slate-900 dark:text-white'}`}>{ann.title}</h3>
+                <p className={`text-sm leading-relaxed mb-4 ${ann.isGlobal ? 'text-blue-50/80' : 'text-slate-600 dark:text-slate-400'}`}>{ann.content}</p>
                 {ann.fileUrl && (
                   <div className="mb-4">
                     <a 
                       href={ann.fileUrl} 
                       target="_blank" 
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-2.5 px-4 py-2 bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 rounded-xl text-xs font-black uppercase tracking-tight hover:bg-blue-100 transition-all border border-blue-100 dark:border-blue-800"
+                      className={`inline-flex items-center gap-2.5 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-tight transition-all border ${
+                        ann.isGlobal 
+                          ? 'bg-white/10 text-white border-white/20 hover:bg-white/20' 
+                          : 'bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 border-blue-100 dark:border-blue-800 hover:bg-blue-100'
+                      }`}
                     >
                       <FileText className="w-4 h-4" />
                       {ann.fileName || 'View Attachment'}
                     </a>
                   </div>
                 )}
-                <div className="flex items-center gap-2 text-xs text-slate-400">
-                  <Calendar className="w-3 h-3" />
-                  {ann.createdAt?.toDate().toLocaleDateString()}
-                </div>
               </div>
             ))}
-            {announcements.length === 0 && (
+            {allAnnouncements.length === 0 && (
               <div className="col-span-full text-center py-20 text-slate-400 italic bg-white dark:bg-slate-900 rounded-[3rem] border border-slate-100 dark:border-slate-800">
-                No announcements from school administration.
+                No announcements to display.
               </div>
             )}
           </div>
