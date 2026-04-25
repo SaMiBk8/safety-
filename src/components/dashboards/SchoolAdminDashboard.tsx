@@ -5,7 +5,7 @@ import { db, storage } from '../../lib/firebase';
 import { useAuth } from '../../context/AuthContext';
 import { Announcement, UserProfile } from '../../types';
 import { motion, AnimatePresence } from 'motion/react';
-import { Plus, Megaphone, Users, Calendar, CheckCircle2, X, Clock, FileText, MessageSquare, GraduationCap, Trash2, Info } from 'lucide-react';
+import { Plus, Megaphone, Users, Calendar, CheckCircle2, X, Clock, FileText, MessageSquare, GraduationCap, Trash2, Info, Star } from 'lucide-react';
 import { toast } from 'sonner';
 import { Chat } from '../Chat';
 import { ContactList } from '../ContactList';
@@ -38,6 +38,8 @@ export const SchoolAdminDashboard: React.FC = () => {
   const [parents, setParents] = useState<UserProfile[]>([]);
   const [students, setStudents] = useState<any[]>([]);
   const [submissions, setSubmissions] = useState<any[]>([]);
+  const [feedbacks, setFeedbacks] = useState<any[]>([]);
+  const [deletingFeedbackId, setDeletingFeedbackId] = useState<string | null>(null);
   const [requests, setRequests] = useState<VisitorMessage[]>([]);
   const [selectedContact, setSelectedContact] = useState<UserProfile | null>(null);
   const [newTitle, setNewTitle] = useState('');
@@ -154,6 +156,17 @@ export const SchoolAdminDashboard: React.FC = () => {
       handleFirestoreError(error, OperationType.LIST, 'schedules', user || undefined);
     });
 
+    const feedbackQ = query(
+      collection(db, 'feedbacks'),
+      where('toSchoolId', '==', profile.schoolId),
+      orderBy('createdAt', 'desc')
+    );
+    const unsubscribeFeedback = onSnapshot(feedbackQ, (snapshot) => {
+      setFeedbacks(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'feedbacks', user || undefined);
+    });
+
     return () => {
       unsubscribeAnn();
       unsubscribeStaff();
@@ -162,6 +175,7 @@ export const SchoolAdminDashboard: React.FC = () => {
       unsubscribeStudents();
       unsubscribeSub();
       unsubscribeSch();
+      unsubscribeFeedback();
     };
   }, [profile?.schoolId]);
 
@@ -416,6 +430,19 @@ export const SchoolAdminDashboard: React.FC = () => {
     }
   };
 
+  const deleteFeedback = async (id: string) => {
+    if (!window.confirm('Are you sure you want to delete this feedback?')) return;
+    setDeletingFeedbackId(id);
+    try {
+      await deleteDoc(doc(db, 'feedbacks', id));
+      toast.success('Feedback deleted successfully');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `feedbacks/${id}`, user || undefined);
+    } finally {
+      setDeletingFeedbackId(null);
+    }
+  };
+
   const handleAssignTeacher = async (studentId: string, teacherId: string) => {
     try {
       await updateDoc(doc(db, 'students', studentId), {
@@ -624,6 +651,15 @@ export const SchoolAdminDashboard: React.FC = () => {
         >
           Students
           {activeTab === 'students' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
+        </button>
+        <button 
+          onClick={() => setActiveTab('feedback')}
+          className={`pb-4 px-2 text-sm font-bold transition-all relative shrink-0 ${
+            activeTab === 'feedback' ? 'text-blue-600' : 'text-slate-400'
+          }`}
+        >
+          Feedback
+          {activeTab === 'feedback' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
         </button>
         <button 
           onClick={() => setActiveTab('submissions')}
@@ -1101,6 +1137,77 @@ export const SchoolAdminDashboard: React.FC = () => {
                   <tr>
                     <td colSpan={4} className="p-8 text-center text-slate-400 italic">
                       No students found in this school.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : activeTab === 'feedback' ? (
+        <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm overflow-hidden">
+          <div className="p-6 border-b border-slate-100 dark:border-slate-800">
+            <h3 className="text-xl font-bold text-slate-900 dark:text-white">Community Feedback</h3>
+            <p className="text-sm text-slate-500">View and manage feedback for staff and students</p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-slate-50 dark:bg-slate-800/50">
+                  <th className="p-4 text-xs font-black text-slate-400 uppercase tracking-widest">From</th>
+                  <th className="p-4 text-xs font-black text-slate-400 uppercase tracking-widest">Target</th>
+                  <th className="p-4 text-xs font-black text-slate-400 uppercase tracking-widest">Rating</th>
+                  <th className="p-4 text-xs font-black text-slate-400 uppercase tracking-widest">Comment</th>
+                  <th className="p-4 text-xs font-black text-slate-400 uppercase tracking-widest">Date</th>
+                  <th className="p-4 text-xs font-black text-slate-400 uppercase tracking-widest">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
+                {feedbacks.map((f) => (
+                  <tr key={f.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition-colors">
+                    <td className="p-4">
+                      <div className="text-sm font-bold text-slate-900 dark:text-white">{f.fromName}</div>
+                      <div className="text-[10px] text-slate-400">ID: {f.fromUid.slice(-6)}</div>
+                    </td>
+                    <td className="p-4">
+                      <div className="text-sm font-bold text-slate-900 dark:text-white">{f.toName}</div>
+                      <div className="text-[10px] text-slate-400">ID: {f.toUid.slice(-6)}</div>
+                    </td>
+                    <td className="p-4">
+                      <div className="flex gap-0.5">
+                        {[1, 2, 3, 4, 5].map((star) => (
+                          <Star key={star} className={`w-3 h-3 ${star <= f.rating ? 'text-amber-400 fill-amber-400' : 'text-slate-200 dark:text-slate-700'}`} />
+                        ))}
+                      </div>
+                    </td>
+                    <td className="p-4 overflow-hidden max-w-[300px]">
+                      <p className="text-xs text-slate-600 dark:text-slate-400 line-clamp-2">{f.comment}</p>
+                    </td>
+                    <td className="p-4 whitespace-nowrap">
+                      <div className="text-[10px] text-slate-400 uppercase font-black">
+                        {f.createdAt?.toDate().toLocaleDateString()}
+                        <div className="text-[9px] opacity-60">{f.createdAt?.toDate().toLocaleTimeString()}</div>
+                      </div>
+                    </td>
+                    <td className="p-4">
+                      <button 
+                        onClick={() => deleteFeedback(f.id)}
+                        disabled={deletingFeedbackId === f.id}
+                        className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-all disabled:opacity-50"
+                      >
+                        {deletingFeedbackId === f.id ? (
+                          <div className="w-5 h-5 border-2 border-red-500/30 border-t-red-500 rounded-full animate-spin" />
+                        ) : (
+                          <Trash2 className="w-5 h-5" />
+                        )}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {feedbacks.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="p-12 text-center text-slate-400 italic">
+                      No feedback records found for this school.
                     </td>
                   </tr>
                 )}

@@ -40,6 +40,7 @@ export const SystemAdminDashboard: React.FC = () => {
   const [isCleaning, setIsCleaning] = useState(false);
   const [isCleaningMessages, setIsCleaningMessages] = useState(false);
   const [isCleaningFeedbacks, setIsCleaningFeedbacks] = useState(false);
+  const [deletingFeedbackId, setDeletingFeedbackId] = useState<string | null>(null);
   const [showCleanupConfirm, setShowCleanupConfirm] = useState(false);
   const [showCleanupMessagesConfirm, setShowCleanupMessagesConfirm] = useState(false);
   const [showCleanupFeedbacksConfirm, setShowCleanupFeedbacksConfirm] = useState(false);
@@ -526,15 +527,6 @@ export const SystemAdminDashboard: React.FC = () => {
           {activeTab === 'relationships' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
         </button>
         <button 
-          onClick={() => setActiveTab('feedbacks')}
-          className={`pb-4 px-2 text-sm font-bold transition-all relative flex items-center gap-2 shrink-0 ${
-            activeTab === 'feedbacks' ? 'text-blue-600' : 'text-slate-400'
-          }`}
-        >
-          User Feedback
-          {activeTab === 'feedbacks' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
-        </button>
-        <button 
           onClick={() => setActiveTab('private_chat')}
           className={`pb-4 px-2 text-sm font-bold transition-all relative flex items-center gap-2 shrink-0 ${
             activeTab === 'private_chat' ? 'text-blue-600' : 'text-slate-400'
@@ -946,83 +938,6 @@ export const SystemAdminDashboard: React.FC = () => {
           {messages.length === 0 && (
             <div className="text-center py-20 text-slate-400 italic">No visitor requests yet.</div>
           )}
-        </div>
-      ) : activeTab === 'feedbacks' ? (
-        <div className="space-y-4">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm overflow-hidden">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-slate-50 dark:bg-slate-800/50 border-bottom border-slate-100 dark:border-slate-800">
-                  <th className="p-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">From</th>
-                  <th className="p-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">To</th>
-                  <th className="p-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Rating</th>
-                  <th className="p-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Comment</th>
-                  <th className="p-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Date</th>
-                  <th className="p-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-right">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
-                {feedbacks.map((fb) => (
-                  <tr 
-                    key={fb.id} 
-                    className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors cursor-pointer"
-                    onClick={() => setSelectedFeedback(fb)}
-                  >
-                    <td className="p-4">
-                      <div className="font-bold text-slate-900 dark:text-white text-sm">{fb.fromName}</div>
-                      <div className="text-[10px] text-slate-400">{fb.fromUid}</div>
-                    </td>
-                    <td className="p-4">
-                      <div className="font-bold text-slate-900 dark:text-white text-sm">{fb.toName}</div>
-                      <div className="text-[10px] text-slate-400">{fb.toUid}</div>
-                    </td>
-                    <td className="p-4">
-                      <div className="flex gap-0.5">
-                        {[1, 2, 3, 4, 5].map((star) => (
-                          <Shield 
-                            key={star}
-                            className={`w-3 h-3 ${star <= fb.rating ? 'text-amber-400 fill-amber-400' : 'text-slate-200 dark:text-slate-700'}`} 
-                          />
-                        ))}
-                      </div>
-                    </td>
-                    <td className="p-4">
-                      <p className="text-xs text-slate-600 dark:text-slate-400 max-w-xs">{fb.comment}</p>
-                    </td>
-                    <td className="p-4">
-                      <div className="text-[10px] text-slate-400">
-                        {fb.createdAt?.toDate().toLocaleString()}
-                      </div>
-                    </td>
-                    <td className="p-4 text-right">
-                      <button 
-                        onClick={async (e) => {
-                          e.stopPropagation();
-                          if (window.confirm('Delete this feedback?')) {
-                            try {
-                              await deleteDoc(doc(db, 'feedbacks', fb.id));
-                              toast.success('Feedback deleted.');
-                            } catch (err) {
-                              toast.error('Failed to delete.');
-                            }
-                          }
-                        }}
-                        className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-colors"
-                        title="Delete Feedback"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-                {feedbacks.length === 0 && (
-                  <tr>
-                    <td colSpan={5} className="p-10 text-center text-slate-400 italic">No feedback submitted yet.</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
         </div>
       ) : (
         <div className="space-y-6">

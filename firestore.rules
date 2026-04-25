@@ -541,7 +541,9 @@ service cloud.firestore {
       return data.fromUid == request.auth.uid &&
              data.toUid is string &&
              data.rating is number &&
-             data.createdAt is timestamp;
+             data.createdAt is timestamp &&
+             (!('fromSchoolId' in data) || data.fromSchoolId is string) &&
+             (!('toSchoolId' in data) || data.toSchoolId is string);
     }
 
     function isValidCall(data) {
@@ -560,8 +562,25 @@ service cloud.firestore {
     }
 
     match /feedbacks/{feedbackId} {
-      allow read: if isAdmin();
+      allow read: if isAdmin() || (
+        isAuthenticated() && 
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'school_admin' &&
+        (
+          resource.data.fromSchoolId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.schoolId ||
+          resource.data.toSchoolId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.schoolId
+        )
+      );
       allow create: if isAuthenticated() && isValidFeedback(request.resource.data);
+      allow delete: if isAdmin() || (
+        isAuthenticated() && 
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'school_admin' &&
+        (
+          resource.data.fromSchoolId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.schoolId ||
+          resource.data.toSchoolId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.schoolId
+        )
+      );
     }
 
     match /calls/{callId} {

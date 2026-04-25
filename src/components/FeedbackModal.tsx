@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Star, X, Send, MessageSquare } from 'lucide-react';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, getDoc, doc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
 import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
@@ -11,10 +11,19 @@ interface FeedbackModalProps {
   onClose: () => void;
   toUid: string;
   toName: string;
+  fromSchoolId?: string;
+  toSchoolId?: string;
 }
 
-export const FeedbackModal: React.FC<FeedbackModalProps> = ({ isOpen, onClose, toUid, toName }) => {
-  const { user } = useAuth();
+export const FeedbackModal: React.FC<FeedbackModalProps> = ({ 
+  isOpen, 
+  onClose, 
+  toUid, 
+  toName,
+  fromSchoolId,
+  toSchoolId 
+}) => {
+  const { user, profile } = useAuth();
   const [rating, setRating] = useState(5);
   const [comment, setComment] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -25,11 +34,24 @@ export const FeedbackModal: React.FC<FeedbackModalProps> = ({ isOpen, onClose, t
 
     setIsSubmitting(true);
     try {
+      let finalToSchoolId = toSchoolId;
+      let finalFromSchoolId = fromSchoolId || profile?.schoolId;
+
+      // If toSchoolId is not provided, try to fetch it from the user's profile
+      if (!finalToSchoolId && toUid) {
+        const userDoc = await getDoc(doc(db, 'users', toUid));
+        if (userDoc.exists()) {
+          finalToSchoolId = userDoc.data().schoolId;
+        }
+      }
+
       await addDoc(collection(db, 'feedbacks'), {
         fromUid: user.uid,
         fromName: user.displayName || 'Anonymous',
+        fromSchoolId: finalFromSchoolId || null,
         toUid,
         toName,
+        toSchoolId: finalToSchoolId || null,
         rating,
         comment,
         createdAt: serverTimestamp()

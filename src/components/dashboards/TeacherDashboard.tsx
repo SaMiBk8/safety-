@@ -5,7 +5,7 @@ import { db, storage } from '../../lib/firebase';
 import { useAuth } from '../../context/AuthContext';
 import { Student, Announcement } from '../../types';
 import { motion, AnimatePresence } from 'motion/react';
-import { Users, ClipboardCheck, GraduationCap, AlertTriangle, MessageSquare, X, CheckCircle2, AlertCircle, BookOpen, FileText, Clock, Megaphone, Calendar, Plus, Info, Trash2 } from 'lucide-react';
+import { Users, ClipboardCheck, GraduationCap, AlertTriangle, MessageSquare, X, CheckCircle2, AlertCircle, BookOpen, FileText, Clock, Megaphone, Calendar, Plus, Info, Trash2, Star } from 'lucide-react';
 import { toast } from 'sonner';
 import { handleFirestoreError, OperationType } from '../../lib/firestore-errors';
 import { Chat } from '../Chat';
@@ -34,6 +34,7 @@ export const TeacherDashboard: React.FC = () => {
   const [selectedContact, setSelectedContact] = useState<{ uid: string, displayName: string } | null>(null);
   const [submissions, setSubmissions] = useState<any[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [sentFeedbacks, setSentFeedbacks] = useState<any[]>([]);
   const [viewMode, setViewMode] = useState<'my' | 'all'>('all');
   const [teacherSubject, setTeacherSubject] = useState(profile?.subject || '');
   const [unreadTotal, setUnreadTotal] = useState(0);
@@ -159,6 +160,21 @@ export const TeacherDashboard: React.FC = () => {
     });
     return () => unsubscribe();
   }, [profile?.schoolId, profile?.uid]);
+
+  useEffect(() => {
+    if (!profile?.uid) return;
+    const q = query(
+      collection(db, 'feedbacks'),
+      where('fromUid', '==', profile.uid),
+      orderBy('createdAt', 'desc')
+    );
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setSentFeedbacks(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (error) => {
+      console.warn('Feedback fetch error:', error);
+    });
+    return () => unsubscribe();
+  }, [profile?.uid]);
 
   const handleReportIncident = async () => {
     if (!selectedStudent || !note) return;
@@ -387,6 +403,7 @@ export const TeacherDashboard: React.FC = () => {
           { id: 'submissions', label: 'Submissions' },
           { id: 'announcements', label: 'Announcements' },
           { id: 'assignments', label: 'Assignments' },
+          { id: 'feedback', label: 'Sent Feedback' },
         ].map((tab) => (
           <button 
             key={tab.id}
@@ -562,6 +579,16 @@ export const TeacherDashboard: React.FC = () => {
                       title="Chat with Parent"
                     >
                       <MessageSquare className="w-4 h-4" />
+                    </button>
+                    <button 
+                      onClick={(e) => { 
+                        e.stopPropagation(); 
+                        setSelectedContactForFeedback({ uid: student.childUid, name: student.name }); 
+                      }}
+                      className="p-2 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-xl hover:bg-amber-50 dark:hover:bg-amber-900/30 hover:text-amber-600 dark:hover:text-amber-400 transition-colors"
+                      title="Send Feedback"
+                    >
+                      <Star className="w-4 h-4" />
                     </button>
                   </div>
                 </motion.div>
@@ -905,6 +932,59 @@ export const TeacherDashboard: React.FC = () => {
             )}
           </div>
         </div>
+      ) : activeTab === 'feedback' ? (
+        <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 shadow-sm overflow-hidden">
+          <div className="p-8 border-b border-slate-50 dark:border-slate-800 flex justify-between items-center bg-slate-50/50 dark:bg-slate-800/50">
+            <div>
+              <h3 className="text-xl font-black text-slate-900 dark:text-white">Feedback History</h3>
+              <p className="text-sm text-slate-500 font-medium">Ratings and comments you've sent to students</p>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-slate-50/50 dark:bg-slate-800/30">
+                  <th className="p-6 text-xs font-black text-slate-400 uppercase tracking-widest">Student</th>
+                  <th className="p-6 text-xs font-black text-slate-400 uppercase tracking-widest">Rating</th>
+                  <th className="p-6 text-xs font-black text-slate-400 uppercase tracking-widest">Comment</th>
+                  <th className="p-6 text-xs font-black text-slate-400 uppercase tracking-widest">Date</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
+                {sentFeedbacks.map((fb) => (
+                  <tr key={fb.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition-all group">
+                    <td className="p-6">
+                      <div className="font-bold text-slate-900 dark:text-white group-hover:text-blue-600 transition-colors">{fb.toName}</div>
+                      <div className="text-[10px] text-slate-400 font-mono">{fb.toUid.slice(0, 8)}...</div>
+                    </td>
+                    <td className="p-6">
+                      <div className="flex gap-1">
+                        {[1, 2, 3, 4, 5].map((star) => (
+                          <Star key={star} className={`w-4 h-4 ${star <= fb.rating ? 'text-amber-400 fill-amber-400 shadow-sm' : 'text-slate-100 dark:text-slate-700'}`} />
+                        ))}
+                      </div>
+                    </td>
+                    <td className="p-6">
+                      <div className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed max-w-md">{fb.comment}</div>
+                    </td>
+                    <td className="p-6">
+                      <div className="text-[10px] font-black text-slate-400 uppercase tracking-tighter">
+                        {fb.createdAt?.toDate().toLocaleString()}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {sentFeedbacks.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="p-20 text-center text-slate-400 italic font-medium bg-slate-50/30">
+                      You haven't sent any feedback yet. You can send feedback from the "Students" tab.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
       ) : null}
 
       {/* Modals */}
@@ -1179,6 +1259,15 @@ export const TeacherDashboard: React.FC = () => {
                       Contact Parent
                     </button>
                     <button 
+                      onClick={() => {
+                        setSelectedContactForFeedback({ uid: selectedUserDetail.childUid, name: selectedUserDetail.name });
+                        setIsDetailModalOpen(false);
+                      }}
+                      className="flex-1 py-4 bg-amber-500 text-white rounded-2xl font-black text-sm uppercase tracking-widest hover:bg-amber-600 transition-all shadow-lg"
+                    >
+                      Give Feedback
+                    </button>
+                    <button 
                       onClick={() => setIsDetailModalOpen(false)}
                       className="px-6 py-4 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-2xl font-black text-sm uppercase tracking-widest hover:bg-slate-200 transition-all"
                     >
@@ -1191,6 +1280,12 @@ export const TeacherDashboard: React.FC = () => {
           </div>
         )}
       </AnimatePresence>
+      <FeedbackModal 
+        isOpen={!!selectedContactForFeedback}
+        onClose={() => setSelectedContactForFeedback(null)}
+        toUid={selectedContactForFeedback?.uid || ''}
+        toName={selectedContactForFeedback?.name || ''}
+      />
     </div>
   );
 };
