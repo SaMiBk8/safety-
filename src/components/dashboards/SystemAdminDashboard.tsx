@@ -39,8 +39,10 @@ export const SystemAdminDashboard: React.FC = () => {
   const [chatUser, setChatUser] = useState<{ uid: string, name: string } | null>(null);
   const [isCleaning, setIsCleaning] = useState(false);
   const [isCleaningMessages, setIsCleaningMessages] = useState(false);
+  const [isCleaningFeedbacks, setIsCleaningFeedbacks] = useState(false);
   const [showCleanupConfirm, setShowCleanupConfirm] = useState(false);
   const [showCleanupMessagesConfirm, setShowCleanupMessagesConfirm] = useState(false);
+  const [showCleanupFeedbacksConfirm, setShowCleanupFeedbacksConfirm] = useState(false);
   const [selectedFeedback, setSelectedFeedback] = useState<any | null>(null);
   const [selectedUserForDetails, setSelectedUserForDetails] = useState<any | null>(null);
   const [unreadPrivateCount, setUnreadPrivateCount] = useState(0);
@@ -283,6 +285,21 @@ export const SystemAdminDashboard: React.FC = () => {
     }
   };
 
+  const cleanupFeedbacks = async () => {
+    setIsCleaningFeedbacks(true);
+    try {
+      const feedbacksSnap = await getDocs(collection(db, 'feedbacks'));
+      const deletePromises = feedbacksSnap.docs.map(d => deleteDoc(d.ref));
+      await Promise.all(deletePromises);
+      setShowCleanupFeedbacksConfirm(false);
+      toast.success('All user feedbacks have been deleted.');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, 'feedbacks', user || undefined);
+    } finally {
+      setIsCleaningFeedbacks(false);
+    }
+  };
+
   const deleteSelectedUsers = async () => {
     if (selectedUserIds.length === 0) return;
     
@@ -438,6 +455,13 @@ export const SystemAdminDashboard: React.FC = () => {
           >
             <MessageSquare className="w-4 h-4" />
             Delete All Messages
+          </button>
+          <button 
+            onClick={() => setShowCleanupFeedbacksConfirm(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 rounded-xl text-sm font-bold hover:bg-rose-100 transition-colors"
+          >
+            <Trash2 className="w-4 h-4" />
+            Delete All Feedbacks
           </button>
           <div className="bg-blue-100 dark:bg-blue-900/30 p-3 rounded-2xl">
             <Shield className="w-6 h-6 text-blue-600 dark:text-blue-400" />
@@ -976,7 +1000,7 @@ export const SystemAdminDashboard: React.FC = () => {
                           e.stopPropagation();
                           if (window.confirm('Delete this feedback?')) {
                             try {
-                              await deleteDoc(doc(db, 'feedback', fb.id));
+                              await deleteDoc(doc(db, 'feedbacks', fb.id));
                               toast.success('Feedback deleted.');
                             } catch (err) {
                               toast.error('Failed to delete.');
@@ -1185,6 +1209,57 @@ export const SystemAdminDashboard: React.FC = () => {
                     className="flex-1 px-6 py-3 bg-amber-600 text-white rounded-2xl font-bold hover:bg-amber-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
                   >
                     {isCleaningMessages ? (
+                      <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    ) : (
+                      'Delete All'
+                    )}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Cleanup Feedbacks Confirmation Modal */}
+      <AnimatePresence>
+        {showCleanupFeedbacksConfirm && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => !isCleaningFeedbacks && setShowCleanupFeedbacksConfirm(false)}
+              className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="relative bg-white dark:bg-slate-900 w-full max-w-md rounded-[2.5rem] shadow-2xl overflow-hidden p-8"
+            >
+              <div className="text-center space-y-4">
+                <div className="w-16 h-16 bg-rose-100 dark:bg-rose-900/30 rounded-full flex items-center justify-center mx-auto">
+                  <Trash2 className="w-8 h-8 text-rose-600 dark:text-rose-400" />
+                </div>
+                <h3 className="text-xl font-black text-slate-900 dark:text-white">Delete All Feedbacks?</h3>
+                <p className="text-slate-500 dark:text-slate-400">
+                  This will permanently delete all user feedback entries. This action cannot be undone.
+                </p>
+                <div className="flex gap-3 pt-4">
+                  <button 
+                    disabled={isCleaningFeedbacks}
+                    onClick={() => setShowCleanupFeedbacksConfirm(false)}
+                    className="flex-1 px-6 py-3 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-2xl font-bold hover:bg-slate-200 transition-colors disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    disabled={isCleaningFeedbacks}
+                    onClick={cleanupFeedbacks}
+                    className="flex-1 px-6 py-3 bg-rose-600 text-white rounded-2xl font-bold hover:bg-rose-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {isCleaningFeedbacks ? (
                       <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                     ) : (
                       'Delete All'
