@@ -5,7 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import { Student, Announcement, SOSAlert, UserProfile } from '../../types';
 import { GoogleMap, useJsApiLoader, Marker } from '@react-google-maps/api';
 import { motion, AnimatePresence } from 'motion/react';
-import { MapPin, Bell, Phone, ShieldAlert, BookOpen, Calendar, X, MessageSquare, Plus, Info, FileText, Clock } from 'lucide-react';
+import { MapPin, Bell, Phone, ShieldAlert, BookOpen, Calendar, X, MessageSquare, Plus, Info, FileText, Clock, UserCheck, ShieldCheck, Users, AlertTriangle } from 'lucide-react';
 import { handleFirestoreError, OperationType } from '../../lib/firestore-errors';
 
 const mapContainerStyle = { width: '100%', height: '300px' };
@@ -35,6 +35,11 @@ export const ParentDashboard: React.FC<{ onStartCall?: (channel: string, receive
   const [selectedAnnouncement, setSelectedAnnouncement] = useState<Announcement | null>(null);
   const [unreadTotal, setUnreadTotal] = useState(0);
   const [lastKnownLocations, setLastKnownLocations] = useState<Record<string, { lat: number, lng: number }>>({});
+  const [authorizedPersons, setAuthorizedPersons] = useState<any[]>([]);
+  const [meetingRequests, setMeetingRequests] = useState<any[]>([]);
+  const [activityPermissions, setActivityPermissions] = useState<any[]>([]);
+  const [isAddingAuthPerson, setIsAddingAuthPerson] = useState(false);
+  const [newAuthPerson, setNewAuthPerson] = useState({ name: '', phone: '', relationship: '' });
 
   useEffect(() => {
     if (!profile?.uid) return;
@@ -179,6 +184,87 @@ export const ParentDashboard: React.FC<{ onStartCall?: (channel: string, receive
       unsubscribeSch();
     };
   }, [children]);
+
+  useEffect(() => {
+    if (!profile?.uid) return;
+
+    const authQ = query(collection(db, 'authorized_persons'), where('parentId', '==', profile.uid));
+    const unsubscribeAuth = onSnapshot(authQ, (snapshot) => {
+      setAuthorizedPersons(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+
+    const meetQ = query(collection(db, 'meeting_requests'), where('parentId', '==', profile.uid));
+    const unsubscribeMeet = onSnapshot(meetQ, (snapshot) => {
+      setMeetingRequests(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+
+    const childIds = children.map(c => c.childUid);
+    if (childIds.length > 0) {
+      const actQ = query(collection(db, 'activity_permissions'), where('childId', 'in', childIds));
+      const unsubscribeAct = onSnapshot(actQ, (snapshot) => {
+        setActivityPermissions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      });
+      return () => {
+        unsubscribeAuth();
+        unsubscribeMeet();
+        unsubscribeAct();
+      };
+    }
+
+    return () => {
+      unsubscribeAuth();
+      unsubscribeMeet();
+    };
+  }, [profile?.uid, children]);
+
+  const handleAddAuthPerson = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!profile?.uid || children.length === 0) return;
+    try {
+      await addDoc(collection(db, 'authorized_persons'), {
+        parentId: profile.uid,
+        childId: children[0].childUid, // For simplicity links to first child, or could be all
+        ...newAuthPerson,
+        createdAt: serverTimestamp()
+      });
+      setNewAuthPerson({ name: '', phone: '', relationship: '' });
+      setIsAddingAuthPerson(false);
+      toast.success("Authorized person added successfully");
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'authorized_persons', user || undefined);
+    }
+  };
+
+  const handlePermissionAction = async (id: string, status: 'approved' | 'rejected') => {
+    try {
+      await updateDoc(doc(db, 'activity_permissions', id), {
+        status,
+        updatedAt: serverTimestamp()
+      });
+      toast.success(`Permission ${status}`);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `activity_permissions/${id}`, user || undefined);
+    }
+  };
+
+  const handleRequestMeeting = async () => {
+    if (!profile?.uid || children.length === 0) return;
+    const reason = prompt("Enter the reason for the meeting request:");
+    if (!reason) return;
+
+    try {
+      await addDoc(collection(db, 'meeting_requests'), {
+        parentId: profile.uid,
+        schoolId: children[0].schoolId,
+        reason,
+        status: 'pending',
+        createdAt: serverTimestamp()
+      });
+      toast.success("Meeting request sent successfully");
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'meeting_requests', user || undefined);
+    }
+  };
 
   const resolveAlert = async (alertId: string) => {
     try {
@@ -579,6 +665,162 @@ export const ParentDashboard: React.FC<{ onStartCall?: (channel: string, receive
               </div>
             </section>
           )}
+
+          {/* Activity Permissions */}
+          {activityPermissions.length > 0 && (
+            <section className="space-y-4">
+              <div className="flex items-center gap-2 font-bold text-slate-900 dark:text-white">
+                <ShieldCheck className="w-5 h-5 text-purple-500" />
+                Activity Consent
+              </div>
+              <div className="space-y-3">
+                {activityPermissions.map(per => (
+                  <div key={per.id} className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-sm">
+                    <div className="flex justify-between items-start mb-2">
+                       <h4 className="font-bold text-sm text-slate-900 dark:text-white uppercase tracking-tight">{per.type}</h4>
+                       <span className={`text-[10px] font-black px-2 py-0.5 rounded-full uppercase ${
+                         per.status === 'pending' ? 'bg-amber-50 text-amber-600' :
+                         per.status === 'approved' ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'
+                       }`}>
+                         {per.status}
+                       </span>
+                    </div>
+                    <p className="text-xs text-slate-500 mb-3">{per.description}</p>
+                    {per.status === 'pending' && (
+                      <div className="flex gap-2 text-xs">
+                        <button 
+                          onClick={() => handlePermissionAction(per.id, 'approved')}
+                          className="flex-1 py-2 bg-emerald-600 text-white rounded-lg font-bold shadow-sm"
+                        >
+                          Approve
+                        </button>
+                        <button 
+                          onClick={() => handlePermissionAction(per.id, 'rejected')}
+                          className="flex-1 py-2 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-lg font-bold"
+                        >
+                          Decline
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* Authorized Persons */}
+          <section className="space-y-4">
+             <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 font-bold text-slate-900 dark:text-white">
+                  <UserCheck className="w-5 h-5 text-emerald-500" />
+                  Authorized Pickup
+                </div>
+                <button 
+                  onClick={() => setIsAddingAuthPerson(true)}
+                  className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-emerald-600"
+                >
+                  <Plus className="w-5 h-5" />
+                </button>
+             </div>
+
+             <AnimatePresence>
+               {isAddingAuthPerson && (
+                 <motion.form 
+                   initial={{ opacity: 0, height: 0 }}
+                   animate={{ opacity: 1, height: 'auto' }}
+                   exit={{ opacity: 0, height: 0 }}
+                   onSubmit={handleAddAuthPerson}
+                   className="bg-slate-50 dark:bg-slate-950 p-4 rounded-2xl space-y-3"
+                 >
+                    <input 
+                      type="text" 
+                      placeholder="Full Name" 
+                      className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg text-xs outline-none focus:ring-1 focus:ring-emerald-500 dark:text-white"
+                      value={newAuthPerson.name}
+                      onChange={e => setNewAuthPerson({...newAuthPerson, name: e.target.value})}
+                      required
+                    />
+                    <div className="flex gap-2">
+                       <input 
+                        type="text" 
+                        placeholder="Phone" 
+                        className="flex-1 px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg text-xs outline-none focus:ring-1 focus:ring-emerald-500 dark:text-white"
+                        value={newAuthPerson.phone}
+                        onChange={e => setNewAuthPerson({...newAuthPerson, phone: e.target.value})}
+                        required
+                      />
+                       <input 
+                        type="text" 
+                        placeholder="Relationship" 
+                        className="flex-1 px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg text-xs outline-none focus:ring-1 focus:ring-emerald-500 dark:text-white"
+                        value={newAuthPerson.relationship}
+                        onChange={e => setNewAuthPerson({...newAuthPerson, relationship: e.target.value})}
+                        required
+                      />
+                    </div>
+                    <div className="flex justify-end gap-2">
+                       <button type="button" onClick={() => setIsAddingAuthPerson(false)} className="px-3 py-1.5 text-xs font-bold text-slate-500">Cancel</button>
+                       <button type="submit" className="px-4 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-bold shadow-sm">Save</button>
+                    </div>
+                 </motion.form>
+               )}
+             </AnimatePresence>
+
+             <div className="space-y-3">
+                {authorizedPersons.map(person => (
+                  <div key={person.id} className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-sm flex items-center gap-3">
+                    <div className="w-10 h-10 bg-slate-100 dark:bg-slate-800 rounded-xl flex items-center justify-center text-slate-400">
+                      <Users className="w-5 h-5" />
+                    </div>
+                    <div>
+                       <div className="font-bold text-sm text-slate-900 dark:text-white">{person.name}</div>
+                       <div className="text-[10px] text-slate-500">{person.relationship} • {person.phone}</div>
+                    </div>
+                  </div>
+                ))}
+                {authorizedPersons.length === 0 && <p className="text-[10px] text-slate-400 italic text-center">No authorized pickup persons added.</p>}
+             </div>
+          </section>
+
+          {/* Meeting Requests */}
+          <section className="space-y-4">
+             <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 font-bold text-slate-900 dark:text-white">
+                  <Users className="w-5 h-5 text-blue-500" />
+                  Staff Meetings
+                </div>
+                <button 
+                  onClick={handleRequestMeeting}
+                  className="px-3 py-1 bg-blue-600 text-white rounded-lg text-xs font-bold shadow-sm"
+                >
+                  Request
+                </button>
+             </div>
+             <div className="space-y-3">
+                {meetingRequests.map(req => (
+                  <div key={req.id} className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-sm">
+                     <div className="flex justify-between items-center mb-2">
+                        <span className={`text-[10px] font-black px-2 py-0.5 rounded-full uppercase ${
+                          req.status === 'pending' ? 'bg-amber-50 text-amber-600' :
+                          req.status === 'scheduled' ? 'bg-blue-50 text-blue-600' :
+                          req.status === 'completed' ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-50 text-slate-400'
+                        }`}>
+                          {req.status}
+                        </span>
+                        <div className="text-[10px] text-slate-400 uppercase font-black tracking-widest">{req.createdAt?.toDate().toLocaleDateString()}</div>
+                     </div>
+                     <p className="text-xs text-slate-600 dark:text-slate-400 font-medium">{req.reason}</p>
+                     {req.date && (
+                       <div className="mt-2 flex items-center gap-2 text-xs font-bold text-blue-600 bg-blue-50 dark:bg-blue-900/30 p-2 rounded-xl">
+                          <Clock className="w-3 h-3" />
+                          Scheduled: {req.date.toDate().toLocaleString()}
+                       </div>
+                     )}
+                  </div>
+                ))}
+                {meetingRequests.length === 0 && <p className="text-[10px] text-slate-400 italic text-center">No meeting requests yet.</p>}
+             </div>
+          </section>
         </div>
       </div>
 

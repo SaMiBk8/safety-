@@ -5,7 +5,7 @@ import { db, storage } from '../../lib/firebase';
 import { useAuth } from '../../context/AuthContext';
 import { Announcement, UserProfile } from '../../types';
 import { motion, AnimatePresence } from 'motion/react';
-import { Plus, Megaphone, Users, Calendar, CheckCircle2, X, Clock, FileText, MessageSquare, GraduationCap, Trash2, Info, Star } from 'lucide-react';
+import { Plus, Megaphone, Users, Calendar, CheckCircle2, X, Clock, FileText, MessageSquare, GraduationCap, Trash2, Info, Star, ClipboardCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { Chat } from '../Chat';
 import { ContactList } from '../ContactList';
@@ -30,7 +30,7 @@ interface VisitorMessage {
 
 export const SchoolAdminDashboard: React.FC = () => {
   const { user, profile } = useAuth();
-  const [activeTab, setActiveTab] = useState<'announcements' | 'staff' | 'students' | 'requests' | 'messenger' | 'submissions' | 'schedules'>('announcements');
+  const [activeTab, setActiveTab] = useState<'announcements' | 'staff' | 'students' | 'requests' | 'messenger' | 'submissions' | 'schedules' | 'activity' | 'meetings' | 'inscriptions'>('announcements');
   const [selectedContactForFeedback, setSelectedContactForFeedback] = useState<{ uid: string, name: string } | null>(null);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [globalAnnouncements, setGlobalAnnouncements] = useState<any[]>([]);
@@ -40,6 +40,11 @@ export const SchoolAdminDashboard: React.FC = () => {
   const [students, setStudents] = useState<any[]>([]);
   const [submissions, setSubmissions] = useState<any[]>([]);
   const [requests, setRequests] = useState<VisitorMessage[]>([]);
+  const [inscriptionRequests, setInscriptionRequests] = useState<any[]>([]);
+  const [activityPermissions, setActivityPermissions] = useState<any[]>([]);
+  const [meetingRequests, setMeetingRequests] = useState<any[]>([]);
+  const [isAddingActivity, setIsAddingActivity] = useState(false);
+  const [newActivity, setNewActivity] = useState({ type: '', description: '', startDate: '', endDate: '' });
   const [selectedContact, setSelectedContact] = useState<UserProfile | null>(null);
   const [newTitle, setNewTitle] = useState('');
   const [newContent, setNewContent] = useState('');
@@ -162,6 +167,39 @@ export const SchoolAdminDashboard: React.FC = () => {
       handleFirestoreError(error, OperationType.LIST, 'schedules', user || undefined);
     });
 
+    const inscQ = query(
+      collection(db, 'inscription_requests'),
+      where('schoolId', '==', profile.schoolId),
+      orderBy('createdAt', 'desc')
+    );
+    const unsubscribeInsc = onSnapshot(inscQ, (snapshot) => {
+      setInscriptionRequests(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'inscription_requests', user || undefined);
+    });
+
+    const actQ = query(
+      collection(db, 'activity_permissions'),
+      where('schoolId', '==', profile.schoolId),
+      orderBy('createdAt', 'desc')
+    );
+    const unsubscribeAct = onSnapshot(actQ, (snapshot) => {
+      setActivityPermissions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'activity_permissions', user || undefined);
+    });
+
+    const meetQ = query(
+      collection(db, 'meeting_requests'),
+      where('schoolId', '==', profile.schoolId),
+      orderBy('createdAt', 'desc')
+    );
+    const unsubscribeMeet = onSnapshot(meetQ, (snapshot) => {
+      setMeetingRequests(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'meeting_requests', user || undefined);
+    });
+
     return () => {
       unsubscribeAnn();
       unsubscribeGlobal();
@@ -171,6 +209,9 @@ export const SchoolAdminDashboard: React.FC = () => {
       unsubscribeStudents();
       unsubscribeSub();
       unsubscribeSch();
+      unsubscribeInsc();
+      unsubscribeAct();
+      unsubscribeMeet();
     };
   }, [profile?.schoolId]);
 
@@ -423,6 +464,42 @@ export const SchoolAdminDashboard: React.FC = () => {
     }
   };
 
+  const handleAddActivity = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!profile?.schoolId) return;
+    try {
+      // For each student in the school, create a permission request
+      const studentsInSchool = students.filter(s => s.schoolId === profile.schoolId);
+      const promises = studentsInSchool.map(student => 
+        addDoc(collection(db, 'activity_permissions'), {
+          schoolId: profile.schoolId,
+          childId: student.childUid,
+          studentId: student.id,
+          ...newActivity,
+          status: 'pending',
+          createdAt: serverTimestamp()
+        })
+      );
+      await Promise.all(promises);
+      setNewActivity({ type: '', description: '', startDate: '', endDate: '' });
+      setIsAddingActivity(false);
+      toast.success("Activity permission requests sent to parents!");
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'activity_permissions', user || undefined);
+    }
+  };
+
+  const handleMeetingAction = async (id: string, status: 'scheduled' | 'cancelled' | 'completed', date?: string) => {
+    try {
+      const updateData: any = { status, updatedAt: serverTimestamp() };
+      if (date) updateData.date = new Date(date);
+      await updateDoc(doc(db, 'meeting_requests', id), updateData);
+      toast.success(`Meeting ${status}`);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `meeting_requests/${id}`, user || undefined);
+    }
+  };
+
   const handleAssignTeacher = async (studentId: string, teacherId: string) => {
     try {
       await updateDoc(doc(db, 'students', studentId), {
@@ -442,6 +519,18 @@ export const SchoolAdminDashboard: React.FC = () => {
       });
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `students/${studentId}`, user || undefined);
+    }
+  };
+
+  const handleUpdateInscriptionStatus = async (id: string, status: 'verified' | 'validated' | 'refused') => {
+    try {
+      await updateDoc(doc(db, 'inscription_requests', id), {
+        status,
+        updatedAt: serverTimestamp()
+      });
+      toast.success(`Request marked as ${status}`);
+    } catch (error) {
+       console.error("Transcription error:", error);
     }
   };
 
@@ -681,6 +770,39 @@ export const SchoolAdminDashboard: React.FC = () => {
         >
           Schedules
           {activeTab === 'schedules' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
+        </button>
+        <button 
+          onClick={() => setActiveTab('activity')}
+          className={`pb-4 px-2 text-sm font-bold transition-all relative shrink-0 ${
+            activeTab === 'activity' ? 'text-blue-600' : 'text-slate-400'
+          }`}
+        >
+          Activity Permissions
+          {activeTab === 'activity' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
+        </button>
+        <button 
+          onClick={() => setActiveTab('meetings')}
+          className={`pb-4 px-2 text-sm font-bold transition-all relative shrink-0 ${
+            activeTab === 'meetings' ? 'text-blue-600' : 'text-slate-400'
+          }`}
+        >
+          Meetings
+          {meetingRequests.filter(r => r.status === 'pending').length > 0 && (
+            <span className="w-2 h-2 bg-amber-500 rounded-full ml-1 inline-block" />
+          )}
+          {activeTab === 'meetings' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
+        </button>
+        <button 
+          onClick={() => setActiveTab('inscriptions')}
+          className={`pb-4 px-2 text-sm font-bold transition-all relative shrink-0 ${
+            activeTab === 'inscriptions' ? 'text-blue-600' : 'text-slate-400'
+          }`}
+        >
+          Inscriptions
+          {inscriptionRequests.filter(r => r.status === 'pending').length > 0 && (
+            <span className="w-2 h-2 bg-blue-500 rounded-full ml-1 inline-block" />
+          )}
+          {activeTab === 'inscriptions' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
         </button>
       </div>
 
@@ -1430,6 +1552,251 @@ export const SchoolAdminDashboard: React.FC = () => {
               </div>
             )}
           </div>
+        </div>
+      ) : activeTab === 'inscriptions' ? (
+        <div className="space-y-6">
+           <h3 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+             <ClipboardCheck className="w-6 h-6 text-blue-600" />
+             Detailed Inscription Requests
+           </h3>
+           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {inscriptionRequests.map(req => (
+                <div key={req.id} className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm space-y-4">
+                   <div className="flex justify-between items-start">
+                      <div className="flex items-center gap-3">
+                         <div className="w-10 h-10 bg-slate-100 dark:bg-slate-800 rounded-xl flex items-center justify-center text-slate-600 dark:text-slate-400 font-bold">
+                            {req.firstName?.[0]}
+                         </div>
+                         <div>
+                            <div className="font-bold text-slate-900 dark:text-white">{req.firstName} {req.lastName}</div>
+                            <div className="text-[10px] text-slate-500 font-black uppercase tracking-tight">{req.role} Application</div>
+                         </div>
+                      </div>
+                      <span className={`text-[10px] font-black px-2 py-0.5 rounded-full uppercase ${
+                        req.status === 'pending' ? 'bg-amber-50 text-amber-600' :
+                        req.status === 'validated' ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'
+                      }`}>
+                        {req.status}
+                      </span>
+                   </div>
+                   
+                   <div className="grid grid-cols-2 gap-4 text-xs bg-slate-50 dark:bg-slate-800/50 p-4 rounded-2xl">
+                      <div>
+                         <label className="text-[10px] font-black text-slate-400 uppercase">Birthdate</label>
+                         <p className="font-bold text-slate-700 dark:text-slate-300">{req.birthday || 'N/A'}</p>
+                      </div>
+                      <div>
+                         <label className="text-[10px] font-black text-slate-400 uppercase">Email</label>
+                         <p className="font-bold text-slate-700 dark:text-slate-300">{req.email}</p>
+                      </div>
+                   </div>
+
+                   {req.experience && (
+                     <div>
+                        <label className="text-[10px] font-black text-slate-400 uppercase">Experience/Note</label>
+                        <p className="text-xs text-slate-600 dark:text-slate-400 bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-100 dark:border-slate-800">
+                          {req.experience}
+                        </p>
+                     </div>
+                   )}
+
+                   {req.attachments && req.attachments.length > 0 && (
+                     <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-400 uppercase">Documents</label>
+                        <div className="flex flex-wrap gap-2">
+                           {req.attachments.map((att: any, idx: number) => (
+                             <a key={idx} href={att.url} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-[10px] font-black uppercase rounded-lg hover:underline">
+                               <FileText className="w-3 h-3" />
+                               {att.title || 'Doc'}
+                             </a>
+                           ))}
+                        </div>
+                     </div>
+                   )}
+
+                   {req.status === 'pending' && (
+                     <div className="flex gap-2 pt-2">
+                        <button 
+                          onClick={() => handleUpdateInscriptionStatus(req.id, 'validated')}
+                          className="flex-1 py-2.5 bg-emerald-600 text-white rounded-xl text-xs font-bold"
+                        >
+                          Validate
+                        </button>
+                        <button 
+                          onClick={() => handleUpdateInscriptionStatus(req.id, 'refused')}
+                          className="flex-1 py-1.5 bg-red-50 text-red-600 rounded-xl text-xs font-bold"
+                        >
+                          Refuse
+                        </button>
+                     </div>
+                   )}
+                </div>
+              ))}
+              {inscriptionRequests.length === 0 && (
+                <div className="col-span-full text-center py-20 text-slate-400 italic">No detailed inscription requests.</div>
+              )}
+           </div>
+        </div>
+      ) : activeTab === 'activity' ? (
+        <div className="space-y-6">
+          <div className="flex items-center justify-between">
+             <h3 className="text-xl font-bold text-slate-900 dark:text-white">Activity Permissions</h3>
+             <button 
+               onClick={() => setIsAddingActivity(!isAddingActivity)}
+               className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold"
+             >
+               {isAddingActivity ? 'Cancel' : 'New Activity Request'}
+             </button>
+          </div>
+
+          <AnimatePresence>
+             {isAddingActivity && (
+               <motion.form 
+                 initial={{ opacity: 0, height: 0 }}
+                 animate={{ opacity: 1, height: 'auto' }}
+                 exit={{ opacity: 0, height: 0 }}
+                 onSubmit={handleAddActivity}
+                 className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-blue-100 dark:border-slate-800 shadow-lg space-y-4 overflow-hidden"
+               >
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <input 
+                      type="text" 
+                      placeholder="Activity Title (e.g. Field Trip to Zoo)" 
+                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
+                      value={newActivity.type}
+                      onChange={e => setNewActivity({...newActivity, type: e.target.value})}
+                      required
+                    />
+                    <div className="flex gap-2">
+                       <input 
+                        type="date" 
+                        className="flex-1 px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
+                        value={newActivity.startDate}
+                        onChange={e => setNewActivity({...newActivity, startDate: e.target.value})}
+                        required
+                      />
+                       <input 
+                        type="date" 
+                        className="flex-1 px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
+                        value={newActivity.endDate}
+                        onChange={e => setNewActivity({...newActivity, endDate: e.target.value})}
+                      />
+                    </div>
+                  </div>
+                  <textarea 
+                    placeholder="Full description of the activity and requirements..." 
+                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 min-h-[100px] dark:text-white"
+                    value={newActivity.description}
+                    onChange={e => setNewActivity({...newActivity, description: e.target.value})}
+                    required
+                  />
+                  <div className="flex justify-end pt-2">
+                     <button type="submit" className="px-8 py-3 bg-blue-600 text-white rounded-xl font-bold shadow-lg">Send to All Parents</button>
+                  </div>
+               </motion.form>
+             )}
+          </AnimatePresence>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+             {activityPermissions.map(per => {
+               const child = students.find(s => s.childUid === per.childId);
+               return (
+                 <div key={per.id} className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm">
+                    <div className="flex justify-between items-start mb-2">
+                       <h4 className="font-bold text-slate-900 dark:text-white">{per.type}</h4>
+                       <span className={`text-[10px] font-black px-2 py-0.5 rounded-full uppercase ${
+                         per.status === 'pending' ? 'bg-amber-50 text-amber-600' :
+                         per.status === 'approved' ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'
+                       }`}>
+                         {per.status}
+                       </span>
+                    </div>
+                    <p className="text-xs text-slate-500 mb-4">{per.description}</p>
+                    <div className="flex items-center gap-2 text-[10px] text-slate-400 border-t border-slate-50 dark:border-slate-800 pt-3">
+                       <Users className="w-3 h-3" />
+                       For: {child?.name || 'Unknown Student'}
+                    </div>
+                 </div>
+               );
+             })}
+             {activityPermissions.length === 0 && <p className="col-span-full text-center py-20 text-slate-400 italic">No activity permission requests created yet.</p>}
+          </div>
+        </div>
+      ) : activeTab === 'meetings' ? (
+        <div className="space-y-6">
+           <h3 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+             <Users className="w-6 h-6 text-blue-600" />
+             Meeting Requests
+           </h3>
+           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {meetingRequests.map(req => {
+                const parent = parents.find(p => p.uid === req.parentId);
+                return (
+                  <div key={req.id} className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm space-y-4">
+                     <div className="flex justify-between items-start">
+                        <div className="flex items-center gap-3">
+                           <div className="w-10 h-10 bg-blue-50 rounded-xl flex items-center justify-center text-blue-600 font-bold">
+                              {parent?.displayName?.[0] || 'P'}
+                           </div>
+                           <div>
+                              <div className="font-bold text-slate-900 dark:text-white">{parent?.displayName || 'Parent'}</div>
+                              <div className="text-[10px] text-slate-500">{parent?.email}</div>
+                           </div>
+                        </div>
+                        <span className={`text-[10px] font-black px-2 py-0.5 rounded-full uppercase ${
+                          req.status === 'pending' ? 'bg-amber-50 text-amber-600' :
+                          req.status === 'scheduled' ? 'bg-blue-50 text-blue-600' :
+                          req.status === 'completed' ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-50 text-slate-400'
+                        }`}>
+                          {req.status}
+                        </span>
+                     </div>
+                     <p className="text-sm font-medium text-slate-600 dark:text-slate-400 bg-slate-50 dark:bg-slate-800/50 p-4 rounded-2xl italic">
+                       "{req.reason}"
+                     </p>
+                     
+                     {req.status === 'pending' && (
+                       <div className="flex flex-col gap-2">
+                          <label className="text-[10px] font-black text-slate-400 uppercase">Schedule Time</label>
+                          <div className="flex gap-2">
+                             <input 
+                              type="datetime-local" 
+                              id={`meet_${req.id}`}
+                              className="flex-1 px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl text-xs outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
+                             />
+                             <button 
+                               onClick={() => {
+                                 const val = (document.getElementById(`meet_${req.id}`) as HTMLInputElement)?.value;
+                                 if (val) handleMeetingAction(req.id, 'scheduled', val);
+                                 else toast.error("Please select a date and time");
+                               }}
+                               className="px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold"
+                             >
+                               Schedule
+                             </button>
+                          </div>
+                       </div>
+                     )}
+
+                     {req.status === 'scheduled' && (
+                       <div className="flex items-center justify-between">
+                          <div className="text-xs font-bold text-blue-600 flex items-center gap-2">
+                             <Clock className="w-4 h-4" />
+                             {req.date?.toDate().toLocaleString()}
+                          </div>
+                          <button 
+                            onClick={() => handleMeetingAction(req.id, 'completed')}
+                            className="px-4 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold"
+                          >
+                            Mark Completed
+                          </button>
+                       </div>
+                     )}
+                  </div>
+                );
+              })}
+              {meetingRequests.length === 0 && <p className="col-span-full text-center py-20 text-slate-400 italic">No meeting requests from parents.</p>}
+           </div>
         </div>
       ) : null}
       <AnimatePresence>

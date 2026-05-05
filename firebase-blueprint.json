@@ -8,12 +8,20 @@
         "uid": { "type": "string", "description": "Firebase Auth UID" },
         "email": { "type": "string", "format": "email" },
         "displayName": { "type": "string" },
-        "role": { "type": "string", "enum": ["system_admin", "school_admin", "teacher", "parent", "child"] },
+        "firstName": { "type": "string" },
+        "lastName": { "type": "string" },
+        "birthday": { "type": "string", "format": "date" },
+        "phone": { "type": "string" },
+        "role": { "type": "string", "enum": ["system_admin", "school_admin", "teacher", "teacher_quran", "teacher_sport", "parent", "child", "staff"] },
         "schoolId": { "type": "string", "description": "Reference to School entity (if applicable)" },
         "createdAt": { "type": "string", "format": "date-time" },
         "status": { "type": "string", "enum": ["active", "blocked"] },
         "parentId": { "type": "string", "description": "UID of the parent (for children)" },
-        "childIds": { "type": "array", "items": { "type": "string" }, "description": "List of child UIDs (for parents)" }
+        "childIds": { "type": "array", "items": { "type": "string" }, "description": "List of child UIDs (for parents)" },
+        "wilaya": { "type": "string" },
+        "commune": { "type": "string" },
+        "specialisation": { "type": "string" },
+        "position": { "type": "string" }
       },
       "required": ["uid", "email", "role", "status"]
     },
@@ -25,6 +33,7 @@
         "id": { "type": "string" },
         "name": { "type": "string" },
         "address": { "type": "string" },
+        "phone": { "type": "string" },
         "adminId": { "type": "string", "description": "UID of the SchoolAdmin" }
       },
       "required": ["id", "name", "adminId"]
@@ -38,10 +47,11 @@
         "childUid": { "type": "string" },
         "parentUid": { "type": "string" },
         "schoolId": { "type": "string" },
-        "teacherId": { "type": "string", "description": "Legacy field, use teacherIds" },
         "teacherIds": { "type": "array", "items": { "type": "string" }, "description": "List of teacher UIDs" },
         "name": { "type": "string" },
         "grade": { "type": "string" },
+        "level": { "type": "string" },
+        "medicalCondition": { "type": "string" },
         "location": { 
           "type": "object",
           "properties": {
@@ -259,6 +269,86 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["title", "content", "createdAt"]
+    },
+    "Certificate": {
+      "title": "Certificate",
+      "description": "Teacher certifications and diplomas",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "teacherId": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "url": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "teacherId", "title", "url"]
+    },
+    "InscriptionRequest": {
+      "title": "Inscription Request",
+      "description": "Requests from users to join a school",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "email": { "type": "string" },
+        "firstName": { "type": "string" },
+        "lastName": { "type": "string" },
+        "birthday": { "type": "string" },
+        "role": { "type": "string" },
+        "experience": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "verified", "validated", "refused"] },
+        "schoolId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "attachments": { "type": "array", "items": { "type": "object", "properties": { "title": { "type": "string" }, "url": { "type": "string" } } } }
+      },
+      "required": ["id", "email", "firstName", "lastName", "role", "status", "createdAt"]
+    },
+    "AuthorizedPerson": {
+      "title": "Authorized Person",
+      "description": "Persons authorized to pick up a child",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "parentId": { "type": "string" },
+        "childId": { "type": "string" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "relationship": { "type": "string" },
+        "photoUrl": { "type": "string" }
+      },
+      "required": ["id", "parentId", "childId", "name"]
+    },
+    "MeetingRequest": {
+      "title": "Meeting Request",
+      "description": "Requests for meetings between parents and staff",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "schoolId": { "type": "string" },
+        "parentId": { "type": "string" },
+        "reason": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "scheduled", "completed", "cancelled"] },
+        "date": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "schoolId", "parentId", "reason", "status", "createdAt"]
+    },
+    "ActivityPermission": {
+      "title": "Activity Permission",
+      "description": "Parental consent for school activities/trips",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "schoolId": { "type": "string" },
+        "childId": { "type": "string" },
+        "type": { "type": "string" },
+        "description": { "type": "string" },
+        "startDate": { "type": "string", "format": "date-time" },
+        "endDate": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "schoolId", "childId", "type", "status", "createdAt"]
     }
   },
   "firestore": {
@@ -325,6 +415,26 @@
     "/global_announcements/{annId}": {
       "schema": "GlobalAnnouncement",
       "description": "System-wide announcements"
+    },
+    "/certificates/{certId}": {
+      "schema": "Certificate",
+      "description": "Teacher certifications"
+    },
+    "/inscription_requests/{reqId}": {
+      "schema": "InscriptionRequest",
+      "description": "User join requests"
+    },
+    "/authorized_persons/{authId}": {
+      "schema": "AuthorizedPerson",
+      "description": "Authorized pickup persons"
+    },
+    "/meeting_requests/{reqId}": {
+      "schema": "MeetingRequest",
+      "description": "Meeting requests"
+    },
+    "/activity_permissions/{perId}": {
+      "schema": "ActivityPermission",
+      "description": "Activity permission requests"
     }
   }
 }

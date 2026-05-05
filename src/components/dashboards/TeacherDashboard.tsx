@@ -18,7 +18,54 @@ export const TeacherDashboard: React.FC = () => {
   const [students, setStudents] = useState<Student[]>([]);
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
   const [note, setNote] = useState('');
-  const [activeTab, setActiveTab] = useState<'students' | 'messenger' | 'submissions' | 'feedback'>('students');
+  const handleAddCertificate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!profile?.uid) return;
+    try {
+      await addDoc(collection(db, 'certificates'), {
+        ...newCert,
+        teacherId: profile.uid,
+        createdAt: serverTimestamp()
+      });
+      setNewCert({ description: '', url: '', studentId: '' });
+      setIsAddingCertificate(false);
+      toast.success("Certificate issued successfully!");
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'certificates', user || undefined);
+    }
+  };
+
+  const handleUpdateQuranProgress = async (studentId: string, surah: string, verse: number) => {
+    try {
+      await addDoc(collection(db, 'quran_progress'), {
+        studentId,
+        teacherId: profile?.uid,
+        surah,
+        verse,
+        createdAt: serverTimestamp()
+      });
+      toast.success("Progress saved");
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'quran_progress', user || undefined);
+    }
+  };
+
+  const handleUpdateSportsTraining = async (studentId: string, activity: string, performance: string) => {
+    try {
+      await addDoc(collection(db, 'sports_training'), {
+        studentId,
+        teacherId: profile?.uid,
+        activity,
+        performance,
+        createdAt: serverTimestamp()
+      });
+      toast.success("Training log saved");
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'sports_training', user || undefined);
+    }
+  };
+
+  const [activeTab, setActiveTab] = useState<'students' | 'messenger' | 'submissions' | 'feedback' | 'certificates' | 'progress'>('students');
   const [selectedContactForFeedback, setSelectedContactForFeedback] = useState<{ uid: string, name: string } | null>(null);
   const [modalType, setModalType] = useState<'attendance' | 'grades' | null>(null);
   const [modalStudent, setModalStudent] = useState<Student | null>(null);
@@ -41,6 +88,11 @@ export const TeacherDashboard: React.FC = () => {
   const [unreadTotal, setUnreadTotal] = useState(0);
   const [selectedSubmission, setSelectedSubmission] = useState<any>(null);
   const [assignments, setAssignments] = useState<any[]>([]);
+  const [certificates, setCertificates] = useState<any[]>([]);
+  const [quranProgress, setQuranProgress] = useState<any[]>([]);
+  const [sportsTraining, setSportsTraining] = useState<any[]>([]);
+  const [isAddingCertificate, setIsAddingCertificate] = useState(false);
+  const [newCert, setNewCert] = useState({ description: '', url: '', studentId: '' });
   const [isAddingAssignment, setIsAddingAssignment] = useState(false);
   const [newAssignTitle, setNewAssignTitle] = useState('');
   const [newAssignDesc, setNewAssignDesc] = useState('');
@@ -170,7 +222,28 @@ export const TeacherDashboard: React.FC = () => {
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'assignments', user || undefined);
     });
-    return () => unsubscribe();
+
+    const certQ = query(collection(db, 'certificates'), where('teacherId', '==', profile.uid));
+    const unsubscribeCert = onSnapshot(certQ, (snapshot) => {
+      setCertificates(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+
+    const quranQ = query(collection(db, 'quran_progress'), where('teacherId', '==', profile.uid));
+    const unsubscribeQuran = onSnapshot(quranQ, (snapshot) => {
+      setQuranProgress(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+
+    const sportsQ = query(collection(db, 'sports_training'), where('teacherId', '==', profile.uid));
+    const unsubscribeSports = onSnapshot(sportsQ, (snapshot) => {
+      setSportsTraining(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+
+    return () => {
+      unsubscribe();
+      unsubscribeCert();
+      unsubscribeQuran();
+      unsubscribeSports();
+    };
   }, [profile?.schoolId, profile?.uid]);
 
   useEffect(() => {
@@ -422,7 +495,9 @@ export const TeacherDashboard: React.FC = () => {
           { id: 'announcements', label: 'Announcements' },
           { id: 'assignments', label: 'Assignments' },
           { id: 'feedback', label: 'Sent Feedback' },
-        ].map((tab) => (
+          { id: 'certificates', label: 'Certificates' },
+          (profile?.role === 'quran_teacher' || profile?.role === 'sports_coach') ? { id: 'progress', label: 'Specialized Progress' } : null,
+        ].filter(Boolean).map((tab: any) => (
           <button 
             key={tab.id}
             onClick={() => setActiveTab(tab.id as any)}
@@ -1017,6 +1092,163 @@ export const TeacherDashboard: React.FC = () => {
               </tbody>
             </table>
           </div>
+        </div>
+      ) : activeTab === 'certificates' ? (
+        <div className="space-y-6">
+           <div className="flex items-center justify-between">
+              <h3 className="text-xl font-bold text-slate-900 dark:text-white">Student Certificates</h3>
+              <button 
+                onClick={() => setIsAddingCertificate(!isAddingCertificate)}
+                className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold"
+              >
+                {isAddingCertificate ? 'Cancel' : 'Issue New Certificate'}
+              </button>
+           </div>
+
+           <AnimatePresence>
+              {isAddingCertificate && (
+                <motion.form 
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  onSubmit={handleAddCertificate}
+                  className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-blue-100 dark:border-slate-800 shadow-lg space-y-4 overflow-hidden"
+                >
+                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <select 
+                        className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
+                        value={newCert.studentId}
+                        onChange={e => setNewCert({...newCert, studentId: e.target.value})}
+                        required
+                      >
+                        <option value="">Select Student</option>
+                        {students.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                      </select>
+                      <input 
+                        type="url" 
+                        placeholder="Certificate PDF/Image URL" 
+                        className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
+                        value={newCert.url}
+                        onChange={e => setNewCert({...newCert, url: e.target.value})}
+                        required
+                      />
+                   </div>
+                   <textarea 
+                    placeholder="Description of the certificate (e.g. Excellent Quran Recitation Level 1)" 
+                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 min-h-[80px] dark:text-white"
+                    value={newCert.description}
+                    onChange={e => setNewCert({...newCert, description: e.target.value})}
+                    required
+                  />
+                  <div className="flex justify-end pt-2">
+                     <button type="submit" className="px-8 py-3 bg-blue-600 text-white rounded-xl font-bold shadow-lg">Issue Certificate</button>
+                  </div>
+                </motion.form>
+              )}
+           </AnimatePresence>
+
+           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {certificates.map(cert => {
+                const student = students.find(s => s.id === cert.studentId);
+                return (
+                  <div key={cert.id} className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm">
+                     <div className="flex justify-between items-start mb-4">
+                        <div className="w-10 h-10 bg-emerald-50 rounded-xl flex items-center justify-center text-emerald-600">
+                           <CheckCircle2 className="w-6 h-6" />
+                        </div>
+                        <a href={cert.url} target="_blank" rel="noreferrer" className="text-[10px] font-black text-blue-600 uppercase hover:underline">View PDF</a>
+                     </div>
+                     <h4 className="font-bold text-slate-900 dark:text-white mb-1">{cert.description}</h4>
+                     <p className="text-xs text-slate-500 mb-4 tracking-tight">Issued to: {student?.name || 'Unknown Student'}</p>
+                     <div className="text-[10px] text-slate-400 uppercase font-black">
+                        {cert.createdAt?.toDate()?.toLocaleDateString()}
+                     </div>
+                  </div>
+                );
+              })}
+              {certificates.length === 0 && <p className="col-span-full text-center py-20 text-slate-400 italic">No certificates issued yet.</p>}
+           </div>
+        </div>
+      ) : activeTab === 'progress' ? (
+        <div className="space-y-6">
+           <h3 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+             {profile?.role === 'quran_teacher' ? <BookOpen className="w-6 h-6 text-emerald-600" /> : <GraduationCap className="w-6 h-6 text-orange-600" />}
+             {profile?.role === 'quran_teacher' ? 'Quran Hifz Progress' : 'Sports Training Logs'}
+           </h3>
+           
+           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm space-y-4">
+                 <h4 className="font-bold text-slate-900 dark:text-white">New Entry</h4>
+                 <div className="space-y-3">
+                    <select 
+                      id="progressStudent"
+                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
+                    >
+                      <option value="">Select Student</option>
+                      {students.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
+                    {profile?.role === 'quran_teacher' ? (
+                      <div className="flex gap-2">
+                         <input type="text" id="surah" placeholder="Surah Name" className="flex-1 px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500 dark:text-white" />
+                         <input type="number" id="verse" placeholder="Verse" className="w-24 px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500 dark:text-white" />
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                         <input type="text" id="sports_activity" placeholder="Activity (e.g. Football Drill)" className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500 dark:text-white" />
+                         <input type="text" id="sports_performance" placeholder="Performance Note" className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500 dark:text-white" />
+                      </div>
+                    )}
+                    <button 
+                      onClick={() => {
+                        const sid = (document.getElementById('progressStudent') as HTMLSelectElement).value;
+                        if (!sid) return toast.error("Select a student");
+                        if (profile?.role === 'quran_teacher') {
+                           const surah = (document.getElementById('surah') as HTMLInputElement).value;
+                           const verse = (document.getElementById('verse') as HTMLInputElement).value;
+                           handleUpdateQuranProgress(sid, surah, parseInt(verse));
+                        } else {
+                           const act = (document.getElementById('sports_activity') as HTMLInputElement).value;
+                           const perf = (document.getElementById('sports_performance') as HTMLInputElement).value;
+                           handleUpdateSportsTraining(sid, act, perf);
+                        }
+                      }}
+                      className="w-full py-3 bg-blue-600 text-white rounded-xl font-bold shadow-lg"
+                    >
+                      Save Progress
+                    </button>
+                 </div>
+              </div>
+
+              <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm">
+                 <h4 className="font-bold text-slate-900 dark:text-white mb-4">Recent Logs</h4>
+                 <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2">
+                    {profile?.role === 'quran_teacher' ? (
+                      quranProgress.map(log => {
+                        const student = students.find(s => s.id === log.studentId);
+                        return (
+                          <div key={log.id} className="p-3 bg-slate-50 dark:bg-slate-800 rounded-2xl">
+                             <div className="font-bold text-sm text-slate-900 dark:text-white">{student?.name || 'Student'}</div>
+                             <div className="text-xs text-emerald-600 font-bold">Surah {log.surah} • Verse {log.verse}</div>
+                             <div className="text-[10px] text-slate-400 mt-1">{log.createdAt?.toDate()?.toLocaleString()}</div>
+                          </div>
+                        );
+                      })
+                    ) : (
+                      sportsTraining.map(log => {
+                        const student = students.find(s => s.id === log.studentId);
+                        return (
+                          <div key={log.id} className="p-3 bg-slate-50 dark:bg-slate-800 rounded-2xl">
+                             <div className="font-bold text-sm text-slate-900 dark:text-white">{student?.name || 'Student'}</div>
+                             <div className="text-xs text-orange-600 font-bold">{log.activity}</div>
+                             <p className="text-[10px] text-slate-500 mt-1">"{log.performance}"</p>
+                             <div className="text-[10px] text-slate-400 mt-1">{log.createdAt?.toDate()?.toLocaleString()}</div>
+                          </div>
+                        );
+                      })
+                    )}
+                 </div>
+              </div>
+           </div>
         </div>
       ) : null}
 

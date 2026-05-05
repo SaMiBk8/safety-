@@ -167,13 +167,19 @@ service cloud.firestore {
     function isValidUser(data) {
       return (data.uid is string) && 
              (data.email is string) &&
-             (!('role' in data) || data.role in ['system_admin', 'school_admin', 'teacher', 'quran_teacher', 'sports_coach', 'parent', 'child', 'authorized_person', 'visitor']) &&
+             (!('role' in data) || data.role in ['system_admin', 'school_admin', 'teacher', 'teacher_quran', 'teacher_sport', 'parent', 'child', 'staff', 'authorized_person', 'visitor']) &&
              (!('status' in data) || data.status in ['active', 'blocked', 'pending']) &&
              (!('createdAt' in data) || data.createdAt is timestamp) &&
              (!('displayName' in data) || (data.displayName == null || data.displayName is string)) &&
+             (!('firstName' in data) || data.firstName is string) &&
+             (!('lastName' in data) || data.lastName is string) &&
+             (!('wilaya' in data) || data.wilaya is string) &&
+             (!('commune' in data) || data.commune is string) &&
+             (!('specialisation' in data) || data.specialisation is string) &&
+             (!('position' in data) || data.position is string) &&
              (!('photoURL' in data) || (data.photoURL == null || data.photoURL is string)) &&
              (!('photoUrl' in data) || (data.photoUrl == null || data.photoUrl is string)) &&
-             (!('requestedRole' in data) || (data.requestedRole == null || data.requestedRole in ['teacher', 'quran_teacher', 'sports_coach', 'parent', 'child', 'school_admin', 'visitor'])) &&
+             (!('requestedRole' in data) || (data.requestedRole == null || data.requestedRole in ['teacher', 'teacher_quran', 'teacher_sport', 'parent', 'child', 'school_admin', 'staff', 'visitor'])) &&
              (!('isDarkMode' in data) || data.isDarkMode is bool) &&
              (!('updatedAt' in data) || data.updatedAt is timestamp);
     }
@@ -559,6 +565,44 @@ service cloud.firestore {
              data.createdAt is timestamp;
     }
 
+    function isValidCertificate(data) {
+      return data.teacherId is string &&
+             data.title is string &&
+             data.url is string &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidInscriptionRequest(data) {
+      return data.email is string &&
+             data.firstName is string &&
+             data.lastName is string &&
+             data.role is string &&
+             data.status in ['pending', 'verified', 'validated', 'refused'] &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidAuthorizedPerson(data) {
+      return data.parentId is string &&
+             data.childId is string &&
+             data.name is string;
+    }
+
+    function isValidMeetingRequest(data) {
+      return data.schoolId is string &&
+             data.parentId is string &&
+             data.reason is string &&
+             data.status in ['pending', 'scheduled', 'completed', 'cancelled'] &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidActivityPermission(data) {
+      return data.schoolId is string &&
+             data.childId is string &&
+             data.type is string &&
+             data.status in ['pending', 'approved', 'rejected'] &&
+             data.createdAt is timestamp;
+    }
+
     function isValidSchedule(data) {
       return data.schoolId is string &&
              data.day in ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'] &&
@@ -614,6 +658,41 @@ service cloud.firestore {
                     request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead']) &&
                     request.resource.data.isRead == true;
       allow delete: if isAdmin();
+    }
+
+    match /certificates/{certId} {
+      allow read: if isAuthenticated();
+      allow create: if (isAdmin() || (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['teacher', 'teacher_quran', 'teacher_sport'] && request.resource.data.teacherId == request.auth.uid)) && isValidCertificate(request.resource.data);
+      allow delete: if isAdmin() || (resource.data.teacherId == request.auth.uid);
+    }
+
+    match /inscription_requests/{reqId} {
+      allow read: if isAuthenticated() && (isAdmin() || isSchoolAdmin(resource.data.schoolId) || resource.data.email == request.auth.token.email);
+      allow create: if isAuthenticated() && isValidInscriptionRequest(request.resource.data);
+      allow update: if isAuthenticated() && (isAdmin() || isSchoolAdmin(resource.data.schoolId));
+      allow delete: if isAdmin();
+    }
+
+    match /authorized_persons/{authId} {
+      allow read: if isAuthenticated() && (isAdmin() || isSchoolAdmin(resource.data.schoolId) || isTeacher(resource.data.schoolId) || request.auth.uid == resource.data.parentId);
+      allow create: if isAuthenticated() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'parent' && request.resource.data.parentId == request.auth.uid && isValidAuthorizedPerson(request.resource.data);
+      allow update: if isAuthenticated() && request.auth.uid == resource.data.parentId && isValidAuthorizedPerson(request.resource.data);
+      allow delete: if isAdmin() || (isAuthenticated() && request.auth.uid == resource.data.parentId);
+    }
+
+    match /meeting_requests/{reqId} {
+      allow read: if isAuthenticated() && (isAdmin() || isSchoolAdmin(resource.data.schoolId) || request.auth.uid == resource.data.parentId);
+      allow create: if isAuthenticated() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'parent' && request.resource.data.parentId == request.auth.uid && isValidMeetingRequest(request.resource.data);
+      allow update: if isAuthenticated() && (isAdmin() || isSchoolAdmin(resource.data.schoolId));
+    }
+
+    match /activity_permissions/{perId} {
+      allow read: if isAuthenticated() && (isAdmin() || isSchoolAdmin(resource.data.schoolId) || request.auth.uid == resource.data.childId || (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'parent' && exists(/databases/$(database)/documents/students/$(resource.data.studentId)) && get(/databases/$(database)/documents/students/$(resource.data.studentId)).data.parentUid == request.auth.uid));
+      allow create: if (isAdmin() || isSchoolAdmin(request.resource.data.schoolId)) && isValidActivityPermission(request.resource.data);
+      allow update: if isAuthenticated() && (
+        (isAdmin() || isSchoolAdmin(resource.data.schoolId)) ||
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'parent' && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt']))
+      ) && isValidActivityPermission(request.resource.data);
     }
   }
 }
