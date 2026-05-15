@@ -22,6 +22,7 @@ import { SportsCoachDashboard } from './components/dashboards/SportsCoachDashboa
 import { AuthorizedPersonDashboard } from './components/dashboards/AuthorizedPersonDashboard';
 import { ParentDashboard } from './components/dashboards/ParentDashboard';
 import { ChildDashboard } from './components/dashboards/ChildDashboard';
+import { StaffDashboard } from './components/dashboards/StaffDashboard';
 import { VisitorDashboard } from './components/dashboards/VisitorDashboard';
 import { VideoCall } from './components/VideoCall';
 import { IncomingCallModal } from './components/IncomingCallModal';
@@ -167,7 +168,7 @@ const VideoCallWrapper = () => {
 };
 
 const Dashboard = () => {
-  const { user, profile, loading, isAdmin, isSchoolAdmin, isTeacher, isQuranTeacher, isSportsCoach, isParent, isChild, isAuthorizedPerson, isVisitor } = useAuth();
+  const { user, profile, loading, isAdmin, isSchoolAdmin, isTeacher, isQuranTeacher, isSportsCoach, isParent, isChild, isAuthorizedPerson, isStaff, isVisitor } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const [activeCall, setActiveCall] = useState<{ id: string, channel: string } | null>(null);
   const [incomingCall, setIncomingCall] = useState<{ id: string, callerName: string, channel: string } | null>(null);
@@ -419,8 +420,9 @@ const Dashboard = () => {
             {isParent && <ParentDashboard onStartCall={startCall} />}
             {isChild && <ChildDashboard onStartCall={startCall} />}
             {isAuthorizedPerson && <AuthorizedPersonDashboard />}
+            {isStaff && <StaffDashboard />}
             
-            {profile.role && !isAdmin && !isSchoolAdmin && !isTeacher && !isParent && !isChild && !isQuranTeacher && !isSportsCoach && !isAuthorizedPerson && (
+            {profile.role && !isAdmin && !isSchoolAdmin && !isTeacher && !isParent && !isChild && !isQuranTeacher && !isSportsCoach && !isAuthorizedPerson && !isStaff && (
               <div className="text-center py-20">
                 <h2 className="text-2xl font-bold text-slate-400">Dashboard for {profile.role} is coming soon...</h2>
               </div>

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { db, storage } from '../../lib/firebase';
-import { collection, query, where, onSnapshot, addDoc, serverTimestamp, getDoc, doc, updateDoc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, addDoc, serverTimestamp, getDoc, doc, updateDoc, orderBy } from 'firebase/firestore';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { 
   ShieldAlert, 
@@ -19,7 +19,9 @@ import {
   Search,
   Plus,
   ArrowLeft,
-  Info
+  Info,
+  GraduationCap,
+  ClipboardCheck
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
@@ -76,6 +78,11 @@ export const ChildDashboard: React.FC<{ onStartCall?: (channel: string, receiver
   const [sportsTraining, setSportsTraining] = useState<any[]>([]);
   const [assignments, setAssignments] = useState<any[]>([]);
   const [schedules, setSchedules] = useState<any[]>([]);
+  const [attendance, setAttendance] = useState<any[]>([]);
+  const [grades, setGrades] = useState<any[]>([]);
+  const [subjects, setSubjects] = useState<any[]>([]);
+  const [resources, setResources] = useState<any[]>([]);
+  const [files, setFiles] = useState<any[]>([]);
 
   useEffect(() => {
     if (!user?.uid) return;
@@ -197,12 +204,42 @@ export const ChildDashboard: React.FC<{ onStartCall?: (channel: string, receiver
       (snapshot) => setSchedules(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })))
     );
 
+    const unsubAttendance = onSnapshot(
+      query(collection(db, 'attendance'), where('studentId', '==', studentData.id)),
+      (snapshot) => setAttendance(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })))
+    );
+
+    const unsubGrades = onSnapshot(
+      query(collection(db, 'grades'), where('studentId', '==', studentData.id), orderBy('createdAt', 'desc')),
+      (snapshot) => setGrades(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })))
+    );
+
+    const unsubSubjects = onSnapshot(
+      query(collection(db, 'subjects'), where('schoolId', '==', studentData.schoolId)),
+      (snapshot) => setSubjects(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })))
+    );
+
+    const unsubResources = onSnapshot(
+      query(collection(db, 'resources')),
+      (snapshot) => setResources(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })))
+    );
+
+    const unsubFiles = onSnapshot(
+      query(collection(db, 'files')),
+      (snapshot) => setFiles(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })))
+    );
+
     return () => {
       if (watchId !== null) navigator.geolocation.clearWatch(watchId);
       unsubAssignments();
       unsubQuran();
       unsubSports();
       unsubSchedules();
+      unsubAttendance();
+      unsubGrades();
+      unsubSubjects();
+      unsubResources();
+      unsubFiles();
     };
   }, [studentData?.id]);
 
@@ -536,7 +573,106 @@ export const ChildDashboard: React.FC<{ onStartCall?: (channel: string, receiver
                 )}
               </div>
             </div>
+
+            <div className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 shadow-xl space-y-6">
+              <h3 className="text-lg font-black flex items-center gap-3 text-slate-900 dark:text-white">
+                <GraduationCap className="text-emerald-600" /> Grades & Exams
+              </h3>
+              <div className="space-y-4 max-h-[300px] overflow-y-auto pr-2">
+                {grades.length > 0 ? grades.map(g => (
+                  <div key={g.id} className="p-4 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-2xl flex justify-between items-center group hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">
+                    <div>
+                      <div className="font-black text-sm text-slate-900 dark:text-white">{g.grade}</div>
+                      <div className="text-[10px] text-slate-500 dark:text-slate-400">Behavior: {g.behavior}</div>
+                      <div className="text-[10px] text-slate-400 mt-1">{formatDate(g.createdAt)}</div>
+                    </div>
+                    <button 
+                      onClick={() => {
+                        setSelectedDetail({ ...g, type: 'grade' });
+                        setActiveModal('detail');
+                      }}
+                      className="p-3 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl hover:text-blue-600 transition-colors flex items-center gap-2 group-hover:scale-105 shadow-sm"
+                    >
+                      <Info className="w-4 h-4" />
+                      <span className="text-[10px] font-black uppercase">Details</span>
+                    </button>
+                  </div>
+                )) : (
+                  <div className="text-center py-10 text-slate-400 italic">No grades found</div>
+                )}
+              </div>
+            </div>
+
+            <div className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 shadow-xl space-y-6">
+              <h3 className="text-lg font-black flex items-center gap-3 text-slate-900 dark:text-white">
+                <ClipboardCheck className="text-purple-600" /> Attendance
+              </h3>
+              <div className="space-y-4 max-h-[300px] overflow-y-auto pr-2">
+                {attendance.length > 0 ? attendance.sort((a,b) => b.date?.seconds - a.date?.seconds).map(at => (
+                  <div key={at.id} className="p-4 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-2xl flex justify-between items-center">
+                    <div>
+                      <div className="font-black text-sm text-slate-900 dark:text-white">{formatDate(at.date).split(',')[0]}</div>
+                      <div className="text-[10px] text-slate-500 dark:text-slate-400">Recorded by teacher</div>
+                    </div>
+                    <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase ${at.status === 'present' ? 'bg-emerald-100 text-emerald-600' : 'bg-red-100 text-red-600'}`}>
+                      {at.status}
+                    </span>
+                  </div>
+                )) : (
+                  <div className="text-center py-10 text-slate-400 italic">No attendance records</div>
+                )}
+              </div>
+            </div>
           </div>
+
+          {/* My Subjects & Resources */}
+          {subjects.length > 0 && (
+            <section className="space-y-6">
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-blue-100 dark:bg-blue-900/30 rounded-2xl text-blue-600">
+                  <BookOpen className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-black text-slate-900 dark:text-white uppercase tracking-tight">My Subjects</h3>
+                  <p className="text-xs text-slate-500 font-medium">Class materials and study resources</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                {subjects.map(s => (
+                  <div key={s.id} className="bg-white dark:bg-slate-900 p-6 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 shadow-sm hover:shadow-md transition-all group">
+                    <div className="flex justify-between items-start mb-4">
+                      <div>
+                        <h4 className="font-black text-slate-900 dark:text-white uppercase tracking-tight">{s.name}</h4>
+                        <p className="text-[10px] text-slate-400 font-bold uppercase">Semester {s.semester}</p>
+                      </div>
+                      <span className="text-[10px] font-black bg-blue-50 dark:bg-blue-900/30 text-blue-600 px-2 py-1 rounded-lg uppercase">
+                        Coeff {s.coefficient}
+                      </span>
+                    </div>
+                    
+                    <div className="space-y-2 mt-4 pt-4 border-t border-slate-50 dark:border-slate-800">
+                      <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Resources</h5>
+                      {resources.filter(r => r.subjectId === s.id).map(r => (
+                        <a 
+                          key={r.id} 
+                          href={r.url} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-2 p-2 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-xl transition-colors group/link"
+                        >
+                          <FileText className="w-3.5 h-3.5 text-blue-500" />
+                          <span className="text-xs font-bold text-slate-600 dark:text-slate-400 group-hover/link:text-blue-600 truncate">{r.title}</span>
+                        </a>
+                      ))}
+                      {resources.filter(r => r.subjectId === s.id).length === 0 && (
+                        <p className="text-[10px] text-slate-400 italic">No resources added yet.</p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
 
           {/* Quick Actions / Contact Parent */}
           <div className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 shadow-xl space-y-6">
@@ -653,6 +789,23 @@ export const ChildDashboard: React.FC<{ onStartCall?: (channel: string, receiver
                         {selectedDetail.description || 'No additional instructions.'}
                       </div>
                     </div>
+                    {files.filter(f => f.announcementId === selectedDetail.id).length > 0 && (
+                      <div className="space-y-2">
+                        <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Attachments</h4>
+                        {files.filter(f => f.announcementId === selectedDetail.id).map(ff => (
+                          <a 
+                            key={ff.id} 
+                            href={ff.url} 
+                            target="_blank" 
+                            rel="noopener noreferrer" 
+                            className="flex items-center gap-2 p-2 bg-blue-50 dark:bg-blue-900/30 rounded-xl text-blue-600 font-bold text-xs"
+                          >
+                            <FileText className="w-3.5 h-3.5" />
+                            {ff.title}
+                          </a>
+                        ))}
+                      </div>
+                    )}
                     {selectedDetail.fileUrl && (
                       <div>
                         <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Material</h4>
@@ -718,6 +871,29 @@ export const ChildDashboard: React.FC<{ onStartCall?: (channel: string, receiver
                         <div className="p-4 bg-amber-50 dark:bg-amber-900/10 text-amber-900 dark:text-amber-200 rounded-2xl text-sm italic border border-amber-100 dark:border-amber-900/20">
                           "{selectedDetail.comment}"
                         </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {selectedDetail.type === 'grade' && (
+                  <div className="space-y-6">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-800 text-center">
+                        <div className="text-[10px] font-black uppercase text-slate-400 mb-1">Grade Outcome</div>
+                        <div className="text-3xl font-black text-blue-600">{selectedDetail.grade}</div>
+                      </div>
+                      <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-800 text-center">
+                        <div className="text-[10px] font-black uppercase text-slate-400 mb-1">Behavior</div>
+                        <div className="text-lg font-black text-emerald-600 uppercase italic">{selectedDetail.behavior}</div>
+                      </div>
+                    </div>
+                    {selectedDetail.comment && (
+                      <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-800">
+                        <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Teacher Feedback</h4>
+                        <p className="text-sm font-medium text-slate-600 dark:text-slate-400 leading-relaxed italic">
+                          "{selectedDetail.comment}"
+                        </p>
                       </div>
                     )}
                   </div>

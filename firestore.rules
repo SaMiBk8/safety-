@@ -131,11 +131,19 @@ service cloud.firestore {
       );
     }
 
-    function isSchoolAdmin(schoolId) {
+    function isStaff(schoolId) {
       return isAuthenticated() && 
         exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'school_admin' &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['school_admin', 'staff'] &&
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.schoolId == schoolId;
+    }
+
+    function isAuthorizedFor(studentId) {
+      return isAuthenticated() && 
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'authorized_person' &&
+        exists(/databases/$(database)/documents/authorized_persons/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/authorized_persons/$(request.auth.uid)).data.childId == get(/databases/$(database)/documents/students/$(studentId)).data.childUid;
     }
 
     function isTeacher(schoolId) {
@@ -256,6 +264,36 @@ service cloud.firestore {
              data.createdAt is timestamp;
     }
 
+    function isValidSubject(data) {
+      return data.id is string &&
+             data.teacherId is string &&
+             data.classId is string &&
+             data.name is string &&
+             data.semester is number;
+    }
+
+    function isValidResource(data) {
+      return data.id is string &&
+             data.homeworkId is string &&
+             data.title is string &&
+             data.url is string;
+    }
+
+    function isValidFile(data) {
+      return data.id is string &&
+             data.announcementId is string &&
+             data.title is string &&
+             data.url is string;
+    }
+
+    function isValidPermission(data) {
+      return data.id is string && data.name is string;
+    }
+
+    function isValidAllow(data) {
+      return data.authorizedPersonId is string && data.permissionId is string;
+    }
+
     function isValidHomeworkSubmission(data) {
       return data.studentId is string &&
              data.schoolId is string &&
@@ -363,11 +401,14 @@ service cloud.firestore {
         request.auth.uid == resource.data.parentUid ||
         isTeacher(resource.data.schoolId) ||
         isSchoolAdmin(resource.data.schoolId) ||
+        isStaff(resource.data.schoolId) ||
+        isAuthorizedFor(studentId) ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'parent')
       );
       allow create: if isAuthenticated() && isValidStudent(request.resource.data) && (
         isAdmin() || 
         isSchoolAdmin(request.resource.data.schoolId) ||
+        isStaff(request.resource.data.schoolId) ||
         (
           // Parent linking a child
           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'parent' &&
@@ -377,6 +418,7 @@ service cloud.firestore {
       allow update: if isAuthenticated() && isValidStudent(request.resource.data) && (
         isAdmin() || 
         isSchoolAdmin(resource.data.schoolId) ||
+        isStaff(resource.data.schoolId) ||
         (isTeacher(resource.data.schoolId) && 
          request.resource.data.childUid == resource.data.childUid &&
          request.resource.data.parentUid == resource.data.parentUid &&
@@ -385,7 +427,7 @@ service cloud.firestore {
         (
           // Parent linking a child
           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'parent' &&
-          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['parentUid', 'updatedAt']) &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['parentUid', 'updatedAt', 'location']) &&
           request.resource.data.parentUid == request.auth.uid &&
           isValidStudent(request.resource.data)
         )
@@ -425,13 +467,13 @@ service cloud.firestore {
     match /incidents/{incidentId} {
       allow read: if isAuthenticated() && (
         isAdmin() || 
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'teacher' ||
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'school_admin'
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['teacher', 'school_admin', 'staff'] ||
+        (exists(/databases/$(database)/documents/students/$(resource.data.studentId)) && get(/databases/$(database)/documents/students/$(resource.data.studentId)).data.parentUid == request.auth.uid)
       );
       allow create: if isAuthenticated() && 
                     isValidIncident(request.resource.data) && (
                       isAdmin() || (
-                        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'teacher' &&
+                        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['teacher', 'school_admin', 'staff'] &&
                         request.resource.data.teacherId == request.auth.uid
                       )
                     );
@@ -693,6 +735,35 @@ service cloud.firestore {
         (isAdmin() || isSchoolAdmin(resource.data.schoolId)) ||
         (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'parent' && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt']))
       ) && isValidActivityPermission(request.resource.data);
+    }
+    
+    match /subjects/{subjectId} {
+      allow read: if isAuthenticated();
+      allow create, update: if (isAdmin() || isSchoolAdmin(request.resource.data.schoolId) || isTeacher(request.resource.data.schoolId)) && isValidSubject(request.resource.data);
+      allow delete: if isAdmin() || isSchoolAdmin(resource.data.schoolId);
+    }
+    
+    match /resources/{resourceId} {
+      allow read: if isAuthenticated();
+      allow create, update: if (isAdmin() || isTeacher(request.resource.data.schoolId)) && isValidResource(request.resource.data);
+      allow delete: if isAdmin() || isTeacher(resource.data.schoolId);
+    }
+    
+    match /files/{fileId} {
+      allow read: if isAuthenticated();
+      allow create, update: if (isAdmin() || isSchoolAdmin(request.resource.data.schoolId) || isStaff(request.resource.data.schoolId)) && isValidFile(request.resource.data);
+      allow delete: if isAdmin() || isSchoolAdmin(resource.data.schoolId);
+    }
+    
+    match /permissions/{permissionId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+    
+    match /allows/{allowId} {
+      allow read: if isAuthenticated();
+      allow create, update: if (isAdmin() || (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'parent' && exists(/databases/$(database)/documents/authorized_persons/$(request.resource.data.authorizedPersonId)) && get(/databases/$(database)/documents/authorized_persons/$(request.resource.data.authorizedPersonId)).data.parentId == request.auth.uid)) && isValidAllow(request.resource.data);
+      allow delete: if isAdmin() || (exists(/databases/$(database)/documents/authorized_persons/$(resource.data.authorizedPersonId)) && get(/databases/$(database)/documents/authorized_persons/$(resource.data.authorizedPersonId)).data.parentId == request.auth.uid);
     }
   }
 }

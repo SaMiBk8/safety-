@@ -390,6 +390,7 @@ export const VisitorDashboard: React.FC = () => {
                         <>
                           {[
                             { id: 'teacher', label: 'Teacher', icon: GraduationCap, desc: 'Quran, Sports, or Academic' },
+                            { id: 'staff', label: 'Staff', icon: Users, desc: 'School logistics & Admin' },
                             { id: 'authorized_person', label: 'Authorized', icon: UserCheck, desc: 'Pickup authorization' },
                             { id: 'system_admin', label: 'Admin', icon: Shield, desc: 'System management' },
                           ].map((role) => (

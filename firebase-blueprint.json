@@ -349,9 +349,91 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "schoolId", "childId", "type", "status", "createdAt"]
+    },
+    "Subject": {
+      "title": "Subject",
+      "description": "Academic subjects taught by teachers in classes",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "teacherId": { "type": "string" },
+        "classId": { "type": "string" },
+        "name": { "type": "string" },
+        "coefficient": { "type": "number" },
+        "semester": { "type": "number" }
+      },
+      "required": ["id", "teacherId", "classId", "name", "semester"]
+    },
+    "Resource": {
+      "title": "Resource",
+      "description": "Educational resources linked to homework",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "homeworkId": { "type": "string" },
+        "title": { "type": "string" },
+        "type": { "type": "string" },
+        "url": { "type": "string" }
+      },
+      "required": ["id", "homeworkId", "title", "url"]
+    },
+    "File": {
+      "title": "File",
+      "description": "Attachments linked to announcements",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "announcementId": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "type": { "type": "string" },
+        "url": { "type": "string" }
+      },
+      "required": ["id", "announcementId", "title", "url"]
+    },
+    "Permission": {
+      "title": "Permission",
+      "description": "Defines what an authorized person can do",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" }
+      },
+      "required": ["id", "name"]
+    },
+    "Allow": {
+      "title": "Allow",
+      "description": "Mapping of permissions to authorized persons",
+      "type": "object",
+      "properties": {
+        "authorizedPersonId": { "type": "string" },
+        "permissionId": { "type": "string" },
+        "relation": { "type": "string", "description": "Type of access allowed" }
+      },
+      "required": ["authorizedPersonId", "permissionId"]
     }
   },
   "firestore": {
+    "/subjects/{subjectId}": {
+      "schema": "Subject",
+      "description": "Academic subjects"
+    },
+    "/resources/{resourceId}": {
+      "schema": "Resource",
+      "description": "Homework resources"
+    },
+    "/files/{fileId}": {
+      "schema": "File",
+      "description": "Announcement attachments"
+    },
+    "/permissions/{permissionId}": {
+      "schema": "Permission",
+      "description": "Defined permissions"
+    },
+    "/allows/{allowId}": {
+      "schema": "Allow",
+      "description": "Permission assignments"
+    },
     "/users/{userId}": {
       "schema": "User",
       "description": "User profiles"

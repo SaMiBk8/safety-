@@ -65,7 +65,88 @@ export const TeacherDashboard: React.FC = () => {
     }
   };
 
-  const [activeTab, setActiveTab] = useState<'students' | 'messenger' | 'submissions' | 'feedback' | 'certificates' | 'progress'>('students');
+  const handleAddExam = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!profile?.schoolId) return;
+    try {
+      await addDoc(collection(db, 'exams'), {
+        ...newExam,
+        schoolId: profile.schoolId,
+        teacherId: profile.uid,
+        createdAt: serverTimestamp()
+      });
+      setNewExam({ title: '', date: '', description: '', subject: '' });
+      setIsAddingExam(false);
+      toast.success("Exam added successfully!");
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'exams', user || undefined);
+    }
+  };
+
+  const handleAddLesson = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!profile?.schoolId) return;
+    try {
+      await addDoc(collection(db, 'schedules'), {
+        ...newLesson,
+        schoolId: profile.schoolId,
+        teacherId: profile.uid,
+        createdAt: serverTimestamp()
+      });
+      setNewLesson({ title: '', day: 'Monday', time: '08:00', room: '' });
+      setIsAddingLesson(false);
+      toast.success("Lesson added to schedule!");
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'schedules', user || undefined);
+    }
+  };
+
+  const handleAddSubject = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!profile?.schoolId) return;
+    try {
+      await addDoc(collection(db, 'subjects'), {
+        ...newSubject,
+        schoolId: profile.schoolId,
+        teacherId: profile.uid,
+        createdAt: serverTimestamp()
+      });
+      setNewSubject({ name: '', coefficient: 1, semester: 1, classId: '' });
+      setIsAddingSubject(false);
+      toast.success("Subject added!");
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'subjects', user || undefined);
+    }
+  };
+
+  const handleAddIncident = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!profile?.schoolId || !profile?.uid) return;
+    try {
+      await addDoc(collection(db, 'incidents'), {
+        ...newIncident,
+        schoolId: profile.schoolId,
+        teacherId: profile.uid,
+        createdAt: serverTimestamp()
+      });
+      setNewIncident({ studentId: '', type: 'behavior', content: '' });
+      setIsAddingIncident(false);
+      toast.success("Incident report submitted successfully!");
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'incidents', user || undefined);
+    }
+  };
+
+  const [activeTab, setActiveTab] = useState<'students' | 'messenger' | 'submissions' | 'feedback' | 'certificates' | 'progress' | 'incidents' | 'academic' | 'announcements' | 'subjects'>('students');
+  const [exams, setExams] = useState<any[]>([]);
+  const [academicSchedules, setAcademicSchedules] = useState<any[]>([]);
+  const [subjects, setSubjects] = useState<any[]>([]);
+  const [isAddingSubject, setIsAddingSubject] = useState(false);
+  const [newSubject, setNewSubject] = useState({ name: '', coefficient: 1, semester: 1, classId: '' });
+  const [isAddingExam, setIsAddingExam] = useState(false);
+  const [isAddingLesson, setIsAddingLesson] = useState(false);
+  const [newExam, setNewExam] = useState({ title: '', date: '', description: '', subject: '' });
+  const [newLesson, setNewLesson] = useState({ title: '', day: 'Monday', time: '08:00', room: '' });
   const [selectedContactForFeedback, setSelectedContactForFeedback] = useState<{ uid: string, name: string } | null>(null);
   const [modalType, setModalType] = useState<'attendance' | 'grades' | null>(null);
   const [modalStudent, setModalStudent] = useState<Student | null>(null);
@@ -92,14 +173,20 @@ export const TeacherDashboard: React.FC = () => {
   const [quranProgress, setQuranProgress] = useState<any[]>([]);
   const [sportsTraining, setSportsTraining] = useState<any[]>([]);
   const [isAddingCertificate, setIsAddingCertificate] = useState(false);
+  const [isAddingIncident, setIsAddingIncident] = useState(false);
   const [newCert, setNewCert] = useState({ description: '', url: '', studentId: '' });
+  const [newIncident, setNewIncident] = useState({ studentId: '', type: 'behavior', content: '' });
   const [isAddingAssignment, setIsAddingAssignment] = useState(false);
   const [newAssignTitle, setNewAssignTitle] = useState('');
   const [newAssignDesc, setNewAssignDesc] = useState('');
   const [newAssignDueDate, setNewAssignDueDate] = useState('');
   const [newAssignDeadline, setNewAssignDeadline] = useState('');
+  const [selectedSubjectId, setSelectedSubjectId] = useState('');
   const [assignFile, setAssignFile] = useState<File | null>(null);
   const [isAssignUploading, setIsAssignUploading] = useState(false);
+  const [resources, setResources] = useState<any[]>([]);
+  const [isAddingResource, setIsAddingResource] = useState(false);
+  const [newResource, setNewResource] = useState({ title: '', url: '', type: 'link', subjectId: '' });
 
   useEffect(() => {
     if (!profile?.uid) return;
@@ -238,11 +325,35 @@ export const TeacherDashboard: React.FC = () => {
       setSportsTraining(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });
 
+    const unsubExams = onSnapshot(
+      query(collection(db, 'exams'), where('schoolId', '==', profile.schoolId), orderBy('date', 'asc')),
+      (snapshot) => setExams(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })))
+    );
+
+    const unsubAcademicSchedules = onSnapshot(
+      query(collection(db, 'schedules'), where('schoolId', '==', profile.schoolId)),
+      (snapshot) => setAcademicSchedules(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })))
+    );
+
+    const unsubSubjects = onSnapshot(
+      query(collection(db, 'subjects'), where('schoolId', '==', profile.schoolId)),
+      (snapshot) => setSubjects(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })))
+    );
+
+    const unsubResources = onSnapshot(
+      query(collection(db, 'resources')),
+      (snapshot) => setResources(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })))
+    );
+
     return () => {
       unsubscribe();
       unsubscribeCert();
       unsubscribeQuran();
       unsubscribeSports();
+      unsubExams();
+      unsubAcademicSchedules();
+      unsubSubjects();
+      unsubResources();
     };
   }, [profile?.schoolId, profile?.uid]);
 
@@ -413,6 +524,7 @@ export const TeacherDashboard: React.FC = () => {
         teacherRole: profile.role,
         title: newAssignTitle,
         description: newAssignDesc,
+        subjectId: selectedSubjectId,
         dueDate: newAssignDueDate ? new Date(newAssignDueDate) : null,
         deadline: newAssignDeadline ? new Date(newAssignDeadline) : null,
         fileName,
@@ -494,8 +606,11 @@ export const TeacherDashboard: React.FC = () => {
           { id: 'submissions', label: 'Submissions' },
           { id: 'announcements', label: 'Announcements' },
           { id: 'assignments', label: 'Assignments' },
-          { id: 'feedback', label: 'Sent Feedback' },
+          { id: 'sent_feedback', label: 'Sent Feedback' },
           { id: 'certificates', label: 'Certificates' },
+          { id: 'subjects', label: 'Subjects' },
+          { id: 'academic', label: 'Academic' },
+          { id: 'incidents', label: 'Incident Reports' },
           (profile?.role === 'quran_teacher' || profile?.role === 'sports_coach') ? { id: 'progress', label: 'Specialized Progress' } : null,
         ].filter(Boolean).map((tab: any) => (
           <button 
@@ -939,6 +1054,20 @@ export const TeacherDashboard: React.FC = () => {
                   />
                 </div>
                 <div className="space-y-1">
+                  <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Subject</label>
+                  <select 
+                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
+                    value={selectedSubjectId}
+                    onChange={(e) => setSelectedSubjectId(e.target.value)}
+                    required
+                  >
+                    <option value="">Select Subject</option>
+                    {subjects.filter(s => s.teacherId === profile?.uid).map(s => (
+                      <option key={s.id} value={s.id}>{s.name} (Semester {s.semester})</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1">
                   <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Class Date</label>
                   <input 
                     type="date" 
@@ -1092,6 +1221,432 @@ export const TeacherDashboard: React.FC = () => {
               </tbody>
             </table>
           </div>
+        </div>
+      ) : activeTab === 'academic' ? (
+        <div className="space-y-8">
+           {/* Exams Management */}
+           <section className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-xl font-black text-slate-900 dark:text-white">Exam Schedule</h3>
+                  <p className="text-sm text-slate-500 font-medium tracking-tight">Manage upcoming student examinations</p>
+                </div>
+                <button 
+                  onClick={() => setIsAddingExam(!isAddingExam)}
+                  className="px-6 py-2.5 bg-emerald-600 text-white rounded-2xl text-xs font-black uppercase tracking-widest shadow-xl shadow-emerald-200 dark:shadow-none hover:bg-emerald-700 transition-all flex items-center gap-2"
+                >
+                  <Plus className="w-4 h-4" />
+                  {isAddingExam ? 'Hide Form' : 'New Exam'}
+                </button>
+              </div>
+
+              <AnimatePresence>
+                {isAddingExam && (
+                  <motion.form 
+                    initial={{ opacity: 0, y: -20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -20 }}
+                    onSubmit={handleAddExam}
+                    className="bg-emerald-50/50 dark:bg-emerald-950/20 p-8 rounded-[2rem] border border-emerald-100 dark:border-emerald-900/30 space-y-4"
+                  >
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                      <input 
+                        type="text" 
+                        placeholder="Exam Title" 
+                        className="w-full px-4 py-3 bg-white dark:bg-slate-900 border border-emerald-100 dark:border-emerald-900/30 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 dark:text-white text-sm"
+                        value={newExam.title}
+                        onChange={e => setNewExam({...newExam, title: e.target.value})}
+                        required
+                      />
+                      <input 
+                        type="text" 
+                        placeholder="Subject" 
+                        className="w-full px-4 py-3 bg-white dark:bg-slate-900 border border-emerald-100 dark:border-emerald-900/30 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 dark:text-white text-sm"
+                        value={newExam.subject}
+                        onChange={e => setNewExam({...newExam, subject: e.target.value})}
+                        required
+                      />
+                      <input 
+                        type="date" 
+                        className="w-full px-4 py-3 bg-white dark:bg-slate-900 border border-emerald-100 dark:border-emerald-900/30 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 dark:text-white text-sm"
+                        value={newExam.date}
+                        onChange={e => setNewExam({...newExam, date: e.target.value})}
+                        required
+                      />
+                      <button type="submit" className="w-full py-3 bg-emerald-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg shadow-emerald-200">
+                        Post Exam
+                      </button>
+                    </div>
+                    <textarea 
+                      placeholder="Exam Description / Topics covered..." 
+                      className="w-full px-4 py-3 bg-white dark:bg-slate-900 border border-emerald-100 dark:border-emerald-900/30 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 min-h-[80px] dark:text-white text-sm"
+                      value={newExam.description}
+                      onChange={e => setNewExam({...newExam, description: e.target.value})}
+                    />
+                  </motion.form>
+                )}
+              </AnimatePresence>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {exams.map(ex => (
+                  <div key={ex.id} className="bg-white dark:bg-slate-900 p-6 rounded-[2rem] border border-slate-100 dark:border-slate-800 shadow-sm relative overflow-hidden group">
+                    <div className="absolute top-0 right-0 p-4">
+                       <GraduationCap className="w-12 h-12 text-slate-50 dark:text-slate-800/50 -rotate-12" />
+                    </div>
+                    <div className="relative z-10">
+                      <span className="px-3 py-1 bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 text-[10px] font-black uppercase rounded-lg mb-3 inline-block">
+                        {ex.subject}
+                      </span>
+                      <h4 className="font-black text-slate-900 dark:text-white text-lg mb-2">{ex.title}</h4>
+                      <div className="flex items-center gap-2 text-slate-500 text-xs mb-4">
+                        <Clock className="w-4 h-4" />
+                        {new Date(ex.date).toLocaleDateString()}
+                      </div>
+                      <p className="text-slate-600 dark:text-slate-400 text-xs leading-relaxed italic">"{ex.description}"</p>
+                    </div>
+                  </div>
+                ))}
+                {exams.length === 0 && <div className="col-span-full py-20 text-center text-slate-400 italic">No exams scheduled.</div>}
+              </div>
+           </section>
+
+           {/* Lesson Schedule Management */}
+           <section className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-xl font-black text-slate-900 dark:text-white">Class Schedule</h3>
+                  <p className="text-sm text-slate-500 font-medium tracking-tight">Set your teaching hours and rooms</p>
+                </div>
+                <button 
+                  onClick={() => setIsAddingLesson(!isAddingLesson)}
+                  className="px-6 py-2.5 bg-blue-600 text-white rounded-2xl text-xs font-black uppercase tracking-widest shadow-xl shadow-blue-200 dark:shadow-none hover:bg-blue-700 transition-all flex items-center gap-2"
+                >
+                  <Plus className="w-4 h-4" />
+                  {isAddingLesson ? 'Hide Form' : 'Add Lesson'}
+                </button>
+              </div>
+
+              <AnimatePresence>
+                {isAddingLesson && (
+                  <motion.form 
+                    initial={{ opacity: 0, y: -20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -20 }}
+                    onSubmit={handleAddLesson}
+                    className="bg-blue-50/50 dark:bg-blue-950/20 p-8 rounded-[2rem] border border-blue-100 dark:border-blue-900/30 space-y-4"
+                  >
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                      <input 
+                        type="text" 
+                        placeholder="Subject / Lesson Title" 
+                        className="w-full px-4 py-3 bg-white dark:bg-slate-900 border border-blue-100 dark:border-blue-900/30 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white text-sm"
+                        value={newLesson.title}
+                        onChange={e => setNewLesson({...newLesson, title: e.target.value})}
+                        required
+                      />
+                      <select 
+                        className="w-full px-4 py-3 bg-white dark:bg-slate-900 border border-blue-100 dark:border-blue-900/30 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white text-sm"
+                        value={newLesson.day}
+                        onChange={e => setNewLesson({...newLesson, day: e.target.value})}
+                        required
+                      >
+                        {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map(d => <option key={d} value={d}>{d}</option>)}
+                      </select>
+                      <input 
+                        type="time" 
+                        className="w-full px-4 py-3 bg-white dark:bg-slate-900 border border-blue-100 dark:border-blue-900/30 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white text-sm"
+                        value={newLesson.time}
+                        onChange={e => setNewLesson({...newLesson, time: e.target.value})}
+                        required
+                      />
+                      <input 
+                        type="text" 
+                        placeholder="Room / Hall" 
+                        className="w-full px-4 py-3 bg-white dark:bg-slate-900 border border-blue-100 dark:border-blue-900/30 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white text-sm"
+                        value={newLesson.room}
+                        onChange={e => setNewLesson({...newLesson, room: e.target.value})}
+                        required
+                      />
+                    </div>
+                    <div className="flex justify-end">
+                      <button type="submit" className="px-10 py-3 bg-blue-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg shadow-blue-200">
+                        Update Schedule
+                      </button>
+                    </div>
+                  </motion.form>
+                )}
+              </AnimatePresence>
+
+              <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 shadow-sm overflow-hidden">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50/50 dark:bg-slate-800/30">
+                      <th className="p-6 text-xs font-black text-slate-400 uppercase tracking-widest">Day</th>
+                      <th className="p-6 text-xs font-black text-slate-400 uppercase tracking-widest">Time</th>
+                      <th className="p-6 text-xs font-black text-slate-400 uppercase tracking-widest">Lesson</th>
+                      <th className="p-6 text-xs font-black text-slate-400 uppercase tracking-widest">Room</th>
+                      <th className="p-6 text-xs font-black text-slate-400 uppercase tracking-widest">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
+                    {academicSchedules.sort((a,b) => {
+                      const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+                      if (a.day !== b.day) return days.indexOf(a.day) - days.indexOf(b.day);
+                      return a.time.localeCompare(b.time);
+                    }).map(s => (
+                      <tr key={s.id} className="hover:bg-slate-50/30 dark:hover:bg-slate-800/20 transition-all group">
+                        <td className="p-6">
+                           <span className="px-3 py-1 bg-slate-100 dark:bg-slate-800 rounded-lg text-xs font-black uppercase text-slate-600 dark:text-slate-300">
+                             {s.day}
+                           </span>
+                        </td>
+                        <td className="p-6">
+                          <div className="flex items-center gap-2 font-mono text-sm text-blue-600 font-bold">
+                            <Clock className="w-4 h-4" />
+                            {s.time}
+                          </div>
+                        </td>
+                        <td className="p-6">
+                          <div className="font-black text-slate-900 dark:text-white">{s.title}</div>
+                        </td>
+                        <td className="p-6 text-slate-500 font-medium text-sm">
+                           {s.room}
+                        </td>
+                        <td className="p-6">
+                           <button 
+                             onClick={async () => {
+                               try {
+                                 await deleteDoc(doc(db, 'schedules', s.id));
+                                 toast.success("Schedule entry removed");
+                               } catch (err) {
+                                 toast.error("Failed to remove");
+                               }
+                             }}
+                             className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-xl transition-all"
+                           >
+                             <Trash2 className="w-4 h-4" />
+                           </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {academicSchedules.length === 0 && (
+                      <tr>
+                        <td colSpan={5} className="p-20 text-center text-slate-400 italic">No schedule set yet.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+           </section>
+        </div>
+      ) : activeTab === 'subjects' ? (
+        <div className="space-y-6">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xl font-bold text-slate-900 dark:text-white">My Taught Subjects</h3>
+            <button 
+              onClick={() => setIsAddingSubject(!isAddingSubject)}
+              className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold flex items-center gap-2 shadow-lg shadow-blue-200 active:scale-95 transition-all"
+            >
+              <Plus className="w-4 h-4" /> Add Subject
+            </button>
+          </div>
+
+          <AnimatePresence>
+            {isAddingSubject && (
+              <motion.form 
+                initial={{ opacity: 0, y: -20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                onSubmit={handleAddSubject}
+                className="bg-white dark:bg-slate-900 p-6 rounded-[2.5rem] border border-blue-100 dark:border-blue-900/30 shadow-xl space-y-4"
+              >
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <input 
+                    type="text" 
+                    placeholder="Subject Name (e.g. Mathematics)" 
+                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white text-sm"
+                    value={newSubject.name}
+                    onChange={e => setNewSubject({...newSubject, name: e.target.value})}
+                    required
+                  />
+                  <input 
+                    type="number" 
+                    placeholder="Coefficient" 
+                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white text-sm"
+                    value={newSubject.coefficient}
+                    onChange={e => setNewSubject({...newSubject, coefficient: Number(e.target.value)})}
+                    required
+                  />
+                  <select 
+                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white text-sm"
+                    value={newSubject.semester}
+                    onChange={e => setNewSubject({...newSubject, semester: Number(e.target.value)})}
+                    required
+                  >
+                    <option value={1}>Semester 1</option>
+                    <option value={2}>Semester 2</option>
+                  </select>
+                </div>
+                <div className="flex justify-end pt-2">
+                  <button type="submit" className="px-8 py-3 bg-blue-600 text-white rounded-xl font-bold">Save Subject</button>
+                </div>
+              </motion.form>
+            )}
+          </AnimatePresence>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {subjects.filter(s => s.teacherId === profile?.uid).map(s => (
+              <div key={s.id} className="bg-white dark:bg-slate-900 p-6 rounded-[2rem] border border-slate-100 dark:border-slate-800 shadow-sm hover:shadow-md transition-all group relative">
+                <div className="flex items-center gap-4 mb-4">
+                  <div className="bg-blue-100 dark:bg-blue-900/30 p-3 rounded-2xl text-blue-600">
+                    <BookOpen className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h4 className="font-black text-slate-900 dark:text-white uppercase tracking-tight">{s.name}</h4>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase">Semester {s.semester}</p>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between pt-4 border-t border-slate-50 dark:border-slate-800 mt-4">
+                  <span className="text-sm font-bold text-slate-600 dark:text-slate-400">Coeff: {s.coefficient}</span>
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={() => {
+                        setIsAddingResource(true);
+                        setNewResource({...newResource, subjectId: s.id});
+                      }}
+                      className="p-2 text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-all"
+                      title="Add Resource"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </button>
+                    <button 
+                      onClick={async () => {
+                        if(!window.confirm('Delete subject?')) return;
+                        await deleteDoc(doc(db, 'subjects', s.id));
+                        toast.success("Subject deleted");
+                      }}
+                      className="p-2 text-red-400 hover:text-red-600 transition-colors opacity-0 group-hover:opacity-100"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Resources List */}
+                <div className="mt-4 space-y-2">
+                  <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Resources</h5>
+                  {resources.filter(r => r.subjectId === s.id).map(r => (
+                    <div key={r.id} className="flex items-center justify-between p-2 bg-slate-50 dark:bg-slate-800 rounded-xl group/res">
+                      <a 
+                        href={r.url} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="text-xs font-medium text-blue-600 truncate flex-1 hover:underline"
+                      >
+                        {r.title}
+                      </a>
+                      <button 
+                        onClick={async () => {
+                          await deleteDoc(doc(db, 'resources', r.id));
+                          toast.success("Resource removed");
+                        }}
+                        className="p-1 text-red-400 opacity-0 group-hover/res:opacity-100 transition-opacity"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+                  {resources.filter(r => r.subjectId === s.id).length === 0 && (
+                    <p className="text-[10px] text-slate-400 italic pl-1">No resources linked.</p>
+                  )}
+                </div>
+              </div>
+            ))}
+            {subjects.filter(s => s.teacherId === profile?.uid).length === 0 && (
+              <p className="col-span-full py-20 text-center text-slate-400 italic">No subjects added by you yet.</p>
+            )}
+          </div>
+
+          {/* Add Resource Modal */}
+          <AnimatePresence>
+            {isAddingResource && (
+              <div className="fixed inset-0 z-[150] flex items-center justify-center p-4">
+                <motion.div 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  onClick={() => setIsAddingResource(false)}
+                  className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm"
+                />
+                <motion.form 
+                  initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                  animate={{ scale: 1, opacity: 1, y: 0 }}
+                  exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    try {
+                      await addDoc(collection(db, 'resources'), {
+                        ...newResource,
+                        teacherId: profile?.uid,
+                        createdAt: serverTimestamp()
+                      });
+                      setIsAddingResource(false);
+                      setNewResource({ title: '', url: '', type: 'link', subjectId: '' });
+                      toast.success("Resource added successfully");
+                    } catch (err) {
+                      toast.error("Failed to add resource");
+                    }
+                  }}
+                  className="relative bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] w-full max-w-md shadow-2xl space-y-4"
+                >
+                  <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-4">Add Subject Resource</h3>
+                  <div className="space-y-4">
+                    <input 
+                      type="text" 
+                      placeholder="Resource Title (e.g. Video Guide)" 
+                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
+                      value={newResource.title}
+                      onChange={e => setNewResource({...newResource, title: e.target.value})}
+                      required
+                    />
+                    <input 
+                      type="url" 
+                      placeholder="Resource Link (https://...)" 
+                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
+                      value={newResource.url}
+                      onChange={e => setNewResource({...newResource, url: e.target.value})}
+                      required
+                    />
+                    <select 
+                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
+                      value={newResource.type}
+                      onChange={e => setNewResource({...newResource, type: e.target.value})}
+                      required
+                    >
+                      <option value="link">Website Link</option>
+                      <option value="video">Video URL</option>
+                      <option value="pdf">PDF Document</option>
+                    </select>
+                  </div>
+                  <div className="flex justify-end gap-2 pt-2">
+                    <button 
+                      type="button" 
+                      onClick={() => setIsAddingResource(false)}
+                      className="px-6 py-3 font-bold text-slate-400"
+                    >
+                      Cancel
+                    </button>
+                    <button 
+                      type="submit" 
+                      className="px-8 py-3 bg-blue-600 text-white rounded-xl font-bold shadow-lg"
+                    >
+                      Save Resource
+                    </button>
+                  </div>
+                </motion.form>
+              </div>
+            )}
+          </AnimatePresence>
         </div>
       ) : activeTab === 'certificates' ? (
         <div className="space-y-6">
@@ -1248,6 +1803,68 @@ export const TeacherDashboard: React.FC = () => {
                     )}
                  </div>
               </div>
+           </div>
+        </div>
+      ) : activeTab === 'incidents' ? (
+        <div className="space-y-6">
+           <div className="flex items-center justify-between">
+              <h3 className="text-xl font-bold text-slate-900 dark:text-white">Student Incident Logs</h3>
+              <button 
+                onClick={() => setIsAddingIncident(!isAddingIncident)}
+                className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold"
+              >
+                {isAddingIncident ? 'Cancel' : 'Report New Incident'}
+              </button>
+           </div>
+
+           <AnimatePresence>
+              {isAddingIncident && (
+                <motion.form 
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  onSubmit={handleAddIncident}
+                  className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-blue-100 dark:border-slate-800 shadow-lg space-y-4 overflow-hidden"
+                >
+                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <select 
+                        className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
+                        value={newIncident.studentId}
+                        onChange={e => setNewIncident({...newIncident, studentId: e.target.value})}
+                        required
+                      >
+                        <option value="">Select Student</option>
+                        {students.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                      </select>
+                      <select 
+                        className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
+                        value={newIncident.type}
+                        onChange={e => setNewIncident({...newIncident, type: e.target.value})}
+                        required
+                      >
+                        <option value="behavior">Behavioral</option>
+                        <option value="safety">Safety/Injury</option>
+                        <option value="academic">Academic Concern</option>
+                        <option value="other">Other</option>
+                      </select>
+                   </div>
+                   <textarea 
+                    placeholder="Provide a detailed description of the incident..." 
+                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 min-h-[100px] dark:text-white"
+                    value={newIncident.content}
+                    onChange={e => setNewIncident({...newIncident, content: e.target.value})}
+                    required
+                  />
+                  <div className="flex justify-end pt-2">
+                     <button type="submit" className="px-8 py-3 bg-blue-600 text-white rounded-xl font-bold shadow-lg">Submit Report</button>
+                  </div>
+                </motion.form>
+              )}
+           </AnimatePresence>
+
+           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {/* Note: In a real app we'd fetch incidents here, but for now we show a summary or the ones reported by this teacher */}
+              <p className="col-span-full text-center py-20 text-slate-400 italic">Manage student safety and behavioral logs here.</p>
            </div>
         </div>
       ) : null}

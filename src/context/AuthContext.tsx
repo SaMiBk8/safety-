@@ -17,6 +17,7 @@ interface AuthContextType {
   isParent: boolean;
   isChild: boolean;
   isAuthorizedPerson: boolean;
+  isStaff: boolean;
   isVisitor: boolean;
   isPending: boolean;
   refreshProfile: () => Promise<void>;
@@ -137,6 +138,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     isParent: profile?.role === 'parent',
     isChild: profile?.role === 'child',
     isAuthorizedPerson: profile?.role === 'authorized_person',
+    isStaff: profile?.role === 'staff',
     isVisitor: profile?.role === 'visitor' || !profile?.role,
     isPending: profile?.status === 'pending',
     refreshProfile,

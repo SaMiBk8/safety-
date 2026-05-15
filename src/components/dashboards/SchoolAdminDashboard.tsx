@@ -30,7 +30,7 @@ interface VisitorMessage {
 
 export const SchoolAdminDashboard: React.FC = () => {
   const { user, profile } = useAuth();
-  const [activeTab, setActiveTab] = useState<'announcements' | 'staff' | 'students' | 'requests' | 'messenger' | 'submissions' | 'schedules' | 'activity' | 'meetings' | 'inscriptions'>('announcements');
+  const [activeTab, setActiveTab] = useState<'announcements' | 'staff' | 'students' | 'requests' | 'messenger' | 'submissions' | 'schedules' | 'activity' | 'meetings' | 'inscriptions' | 'incidents' | 'subjects' | 'files'>('announcements');
   const [selectedContactForFeedback, setSelectedContactForFeedback] = useState<{ uid: string, name: string } | null>(null);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [globalAnnouncements, setGlobalAnnouncements] = useState<any[]>([]);
@@ -40,10 +40,17 @@ export const SchoolAdminDashboard: React.FC = () => {
   const [students, setStudents] = useState<any[]>([]);
   const [submissions, setSubmissions] = useState<any[]>([]);
   const [requests, setRequests] = useState<VisitorMessage[]>([]);
+  const [incidents, setIncidents] = useState<any[]>([]);
   const [inscriptionRequests, setInscriptionRequests] = useState<any[]>([]);
   const [activityPermissions, setActivityPermissions] = useState<any[]>([]);
   const [meetingRequests, setMeetingRequests] = useState<any[]>([]);
+  const [subjects, setSubjects] = useState<any[]>([]);
+  const [files, setFiles] = useState<any[]>([]);
+  const [isAddingSubject, setIsAddingSubject] = useState(false);
+  const [newSubject, setNewSubject] = useState({ name: '', coefficient: 1, semester: 1 });
   const [isAddingActivity, setIsAddingActivity] = useState(false);
+  const [isAddingIncident, setIsAddingIncident] = useState(false);
+  const [newIncident, setNewIncident] = useState({ studentId: '', type: 'behavior', content: '' });
   const [newActivity, setNewActivity] = useState({ type: '', description: '', startDate: '', endDate: '' });
   const [selectedContact, setSelectedContact] = useState<UserProfile | null>(null);
   const [newTitle, setNewTitle] = useState('');
@@ -200,6 +207,27 @@ export const SchoolAdminDashboard: React.FC = () => {
       handleFirestoreError(error, OperationType.LIST, 'meeting_requests', user || undefined);
     });
 
+    const incQ = query(
+      collection(db, 'incidents'),
+      where('schoolId', '==', profile.schoolId),
+      orderBy('createdAt', 'desc')
+    );
+    const unsubscribeInc = onSnapshot(incQ, (snapshot) => {
+      setIncidents(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'incidents', user || undefined);
+    });
+
+    const subjsQ = query(collection(db, 'subjects'), where('schoolId', '==', profile.schoolId));
+    const unsubscribeSubjs = onSnapshot(subjsQ, (snapshot) => {
+      setSubjects(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+
+    const fileQ = query(collection(db, 'files'));
+    const unsubscribeFile = onSnapshot(fileQ, (snapshot) => {
+      setFiles(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+
     return () => {
       unsubscribeAnn();
       unsubscribeGlobal();
@@ -212,6 +240,9 @@ export const SchoolAdminDashboard: React.FC = () => {
       unsubscribeInsc();
       unsubscribeAct();
       unsubscribeMeet();
+      unsubscribeInc();
+      unsubscribeSubjs();
+      unsubscribeFile();
     };
   }, [profile?.schoolId]);
 
@@ -489,6 +520,24 @@ export const SchoolAdminDashboard: React.FC = () => {
     }
   };
 
+  const handleAddIncident = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!profile?.schoolId || !profile?.uid) return;
+    try {
+      await addDoc(collection(db, 'incidents'), {
+        ...newIncident,
+        schoolId: profile.schoolId,
+        teacherId: profile.uid,
+        createdAt: serverTimestamp()
+      });
+      setNewIncident({ studentId: '', type: 'behavior', content: '' });
+      setIsAddingIncident(false);
+      toast.success("Incident report submitted successfully!");
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'incidents', user || undefined);
+    }
+  };
+
   const handleMeetingAction = async (id: string, status: 'scheduled' | 'cancelled' | 'completed', date?: string) => {
     try {
       const updateData: any = { status, updatedAt: serverTimestamp() };
@@ -579,12 +628,20 @@ export const SchoolAdminDashboard: React.FC = () => {
         schoolId: profile.schoolId,
         title: newTitle,
         content: newContent,
-        fileName,
-        fileUrl,
         authorId: profile.uid,
         createdAt: serverTimestamp(),
         deadline: newDeadline ? new Date(newDeadline) : null
+      }).then(async (docRef) => {
+        if (fileUrl) {
+          await addDoc(collection(db, 'files'), {
+            announcementId: docRef.id,
+            title: fileName,
+            url: fileUrl,
+            createdAt: serverTimestamp()
+          });
+        }
       });
+
       setNewTitle('');
       setNewContent('');
       setNewDeadline('');
@@ -710,6 +767,24 @@ export const SchoolAdminDashboard: React.FC = () => {
           {activeTab === 'announcements' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
         </button>
         <button 
+          onClick={() => setActiveTab('subjects')}
+          className={`pb-4 px-2 text-sm font-bold transition-all relative shrink-0 ${
+            activeTab === 'subjects' ? 'text-blue-600' : 'text-slate-400'
+          }`}
+        >
+          Subjects
+          {activeTab === 'subjects' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
+        </button>
+        <button 
+          onClick={() => setActiveTab('files')}
+          className={`pb-4 px-2 text-sm font-bold transition-all relative shrink-0 ${
+            activeTab === 'files' ? 'text-blue-600' : 'text-slate-400'
+          }`}
+        >
+          Resources
+          {activeTab === 'files' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
+        </button>
+        <button 
           onClick={() => setActiveTab('staff')}
           className={`pb-4 px-2 text-sm font-bold transition-all relative shrink-0 ${
             activeTab === 'staff' ? 'text-blue-600' : 'text-slate-400'
@@ -803,6 +878,15 @@ export const SchoolAdminDashboard: React.FC = () => {
             <span className="w-2 h-2 bg-blue-500 rounded-full ml-1 inline-block" />
           )}
           {activeTab === 'inscriptions' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
+        </button>
+        <button 
+          onClick={() => setActiveTab('incidents')}
+          className={`pb-4 px-2 text-sm font-bold transition-all relative shrink-0 ${
+            activeTab === 'incidents' ? 'text-blue-600' : 'text-slate-400'
+          }`}
+        >
+          Incidents
+          {activeTab === 'incidents' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
         </button>
       </div>
 
@@ -912,6 +996,19 @@ export const SchoolAdminDashboard: React.FC = () => {
                 
                 <p className={`text-sm leading-relaxed ${ann.isGlobal ? 'text-blue-50/80' : 'text-slate-600 dark:text-slate-400'}`}>{ann.content}</p>
                 
+                <div className="flex flex-col gap-2 mt-2">
+                   {files.filter(f => f.announcementId === ann.id).map(f => (
+                     <a key={f.id} href={f.url} target="_blank" rel="noopener noreferrer" className={`flex items-center gap-2 p-3 rounded-2xl border text-[10px] font-black uppercase transition-all ${
+                       ann.isGlobal 
+                        ? 'bg-white/10 border-white/20 text-white hover:bg-white/20' 
+                        : 'bg-blue-50 dark:bg-blue-900/10 border-blue-100 dark:border-blue-900/20 text-blue-600 dark:text-blue-400 hover:bg-blue-100'
+                     }`}>
+                       <FileText className="w-4 h-4" />
+                       {f.title}
+                     </a>
+                   ))}
+                </div>
+
                 {ann.deadline && (
                   <div className={`flex items-center gap-2 p-3 rounded-2xl border text-[10px] font-black uppercase ${
                     ann.isGlobal 
@@ -1018,6 +1115,7 @@ export const SchoolAdminDashboard: React.FC = () => {
                       <option value="teacher">General Teacher</option>
                       <option value="quran_teacher">Quran Teacher</option>
                       <option value="sports_coach">Sports Coach</option>
+                      <option value="staff">School Staff</option>
                     </select>
                   </div>
                 </div>
@@ -1796,6 +1894,237 @@ export const SchoolAdminDashboard: React.FC = () => {
                 );
               })}
               {meetingRequests.length === 0 && <p className="col-span-full text-center py-20 text-slate-400 italic">No meeting requests from parents.</p>}
+           </div>
+        </div>
+      ) : activeTab === 'subjects' ? (
+        <div className="space-y-6">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xl font-black text-slate-900 dark:text-white uppercase tracking-tight">Academic Subjects</h3>
+            <button 
+              onClick={() => setIsAddingSubject(!isAddingSubject)}
+              className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold flex items-center gap-2 shadow-lg"
+            >
+              <Plus className="w-4 h-4" /> Add Academic Subject
+            </button>
+          </div>
+
+          <AnimatePresence>
+            {isAddingSubject && (
+              <motion.form 
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  if (!profile?.schoolId) return;
+                  try {
+                    await addDoc(collection(db, 'subjects'), {
+                      ...newSubject,
+                      schoolId: profile.schoolId,
+                      adminId: profile.uid,
+                      createdAt: serverTimestamp()
+                    });
+                    setNewSubject({ name: '', coefficient: 1, semester: 1 });
+                    setIsAddingSubject(false);
+                    toast.success("Subject added to school curriculum");
+                  } catch (err) {
+                    toast.error("Failed to add subject");
+                  }
+                }}
+                className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-blue-100 dark:border-slate-800 shadow-lg space-y-4 overflow-hidden"
+              >
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                   <div className="space-y-1">
+                     <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Subject Name</label>
+                     <input 
+                      type="text" 
+                      placeholder="e.g. Mathematics"
+                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
+                      value={newSubject.name}
+                      onChange={e => setNewSubject({...newSubject, name: e.target.value})}
+                      required
+                    />
+                   </div>
+                   <div className="space-y-1">
+                     <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Coefficient</label>
+                     <input 
+                      type="number" 
+                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
+                      value={newSubject.coefficient}
+                      onChange={e => setNewSubject({...newSubject, coefficient: Number(e.target.value)})}
+                      required
+                    />
+                   </div>
+                   <div className="space-y-1">
+                     <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Semester</label>
+                     <select 
+                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
+                      value={newSubject.semester}
+                      onChange={e => setNewSubject({...newSubject, semester: Number(e.target.value)})}
+                      required
+                    >
+                      <option value={1}>Semester 1</option>
+                      <option value={2}>Semester 2</option>
+                    </select>
+                   </div>
+                </div>
+                <div className="flex justify-end pt-2">
+                  <button type="submit" className="px-8 py-3 bg-blue-600 text-white rounded-xl font-bold">Register Subject</button>
+                </div>
+              </motion.form>
+            )}
+          </AnimatePresence>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6">
+            {subjects.map(s => (
+              <div key={s.id} className="p-6 bg-white dark:bg-slate-900 rounded-[2rem] border border-slate-100 dark:border-slate-800 shadow-sm group">
+                <div className="flex justify-between items-start mb-4">
+                  <div className="w-12 h-12 bg-blue-50 dark:bg-blue-900/30 rounded-2xl flex items-center justify-center text-blue-600 font-black text-xl">
+                    {s.name[0]}
+                  </div>
+                  <button 
+                    onClick={async () => {
+                      if(!window.confirm('Delete subject?')) return;
+                      await deleteDoc(doc(db, 'subjects', s.id));
+                      toast.success("Subject removed");
+                    }}
+                    className="p-2 text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-all"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+                <h4 className="font-black text-slate-900 dark:text-white uppercase tracking-tight">{s.name}</h4>
+                <p className="text-[10px] text-slate-400 font-bold uppercase mt-1">
+                  {files.filter(f => f.subjectId === s.id).length} Resources
+                </p>
+              </div>
+            ))}
+            {subjects.length === 0 && <p className="col-span-full py-12 text-center text-slate-400 italic">No subjects registered yet.</p>}
+          </div>
+        </div>
+      ) : activeTab === 'files' ? (
+        <div className="space-y-6">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xl font-black text-slate-900 dark:text-white uppercase tracking-tight">School Resources</h3>
+            <p className="text-xs text-slate-400 font-black uppercase tracking-widest px-1">All shared pedagogical materials</p>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            {files.length > 0 ? files.map(f => (
+              <div key={f.id} className="p-6 bg-white dark:bg-slate-900 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm flex flex-col items-center text-center gap-4 group">
+                <div className="p-4 bg-blue-50 dark:bg-blue-900/30 rounded-2xl group-hover:bg-blue-100 transition-colors">
+                  <FileText className="w-8 h-8 text-blue-600" />
+                </div>
+                <div className="flex-1 w-full min-w-0">
+                  <h4 className="font-black text-slate-900 dark:text-white text-xs uppercase tracking-tight truncate w-full px-2">
+                    {f.title || 'Untitled Resource'}
+                  </h4>
+                  <div className="text-[10px] text-slate-400 font-bold mt-1">
+                    {f.type || 'Document'} • {f.createdAt?.toDate().toLocaleDateString()}
+                  </div>
+                </div>
+                <div className="flex gap-2 w-full pt-2">
+                  <a href={f.url} target="_blank" rel="noopener noreferrer" className="flex-1 py-2 bg-blue-600 text-white rounded-xl text-[10px] font-black uppercase tracking-tight text-center">View</a>
+                  <button 
+                    onClick={async () => {
+                      if(!window.confirm('Delete resource?')) return;
+                      await deleteDoc(doc(db, 'files', f.id));
+                      toast.success("Resource deleted");
+                    }}
+                    className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            )) : (
+              <div className="col-span-full py-20 text-center text-slate-400 italic">No resources found.</div>
+            )}
+          </div>
+        </div>
+      ) : activeTab === 'incidents' ? (
+        <div className="space-y-6">
+           <div className="flex items-center justify-between">
+              <h3 className="text-xl font-bold text-slate-900 dark:text-white">Safety & Behavioral Incidents</h3>
+              <button 
+                onClick={() => setIsAddingIncident(!isAddingIncident)}
+                className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold"
+              >
+                {isAddingIncident ? 'Cancel' : 'Report New Incident'}
+              </button>
+           </div>
+
+           <AnimatePresence>
+              {isAddingIncident && (
+                <motion.form 
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  onSubmit={handleAddIncident}
+                  className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-blue-100 dark:border-slate-800 shadow-lg space-y-4 overflow-hidden"
+                >
+                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <select 
+                        className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
+                        value={newIncident.studentId}
+                        onChange={e => setNewIncident({...newIncident, studentId: e.target.value})}
+                        required
+                      >
+                        <option value="">Select Student</option>
+                        {students.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                      </select>
+                      <select 
+                        className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
+                        value={newIncident.type}
+                        onChange={e => setNewIncident({...newIncident, type: e.target.value})}
+                        required
+                      >
+                        <option value="behavior">Behavioral</option>
+                        <option value="safety">Safety/Injury</option>
+                        <option value="academic">Academic Concern</option>
+                        <option value="other">Other</option>
+                      </select>
+                   </div>
+                   <textarea 
+                    placeholder="Provide a detailed description of the incident..." 
+                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 min-h-[100px] dark:text-white"
+                    value={newIncident.content}
+                    onChange={e => setNewIncident({...newIncident, content: e.target.value})}
+                    required
+                  />
+                  <div className="flex justify-end pt-2">
+                     <button type="submit" className="px-8 py-3 bg-blue-600 text-white rounded-xl font-bold shadow-lg">Submit Report</button>
+                  </div>
+                </motion.form>
+              )}
+           </AnimatePresence>
+
+           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {incidents.map(inc => {
+                const student = students.find(s => s.id === inc.studentId);
+                return (
+                  <div key={inc.id} className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm space-y-3">
+                     <div className="flex justify-between items-start">
+                        <span className={`text-[10px] font-black px-2 py-0.5 rounded-full uppercase ${
+                          inc.type === 'safety' ? 'bg-red-50 text-red-600' : 
+                          inc.type === 'behavior' ? 'bg-amber-50 text-amber-600' : 'bg-blue-50 text-blue-600'
+                        }`}>
+                          {inc.type}
+                        </span>
+                        <div className="text-[10px] text-slate-400 font-bold">{inc.createdAt?.toDate().toLocaleString()}</div>
+                     </div>
+                     <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 bg-slate-100 dark:bg-slate-800 rounded-lg flex items-center justify-center font-bold text-slate-500 text-xs">
+                           {student?.name?.[0]}
+                        </div>
+                        <div className="font-bold text-sm text-slate-900 dark:text-white">{student?.name || 'Unknown Student'}</div>
+                     </div>
+                     <p className="text-xs text-slate-600 dark:text-slate-400 italic bg-slate-50 dark:bg-slate-800/50 p-3 rounded-xl border border-slate-50 dark:border-slate-700/50">
+                       "{inc.content}"
+                     </p>
+                  </div>
+                );
+              })}
+              {incidents.length === 0 && <p className="col-span-full text-center py-20 text-slate-400 italic">No incidents reported recently.</p>}
            </div>
         </div>
       ) : null}

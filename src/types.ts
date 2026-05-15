@@ -7,6 +7,7 @@ export type UserRole =
   | 'parent' 
   | 'child' 
   | 'authorized_person' 
+  | 'staff'
   | 'visitor';
 
 export interface UserProfile {

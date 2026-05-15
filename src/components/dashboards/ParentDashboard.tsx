@@ -5,7 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import { Student, Announcement, SOSAlert, UserProfile } from '../../types';
 import { GoogleMap, useJsApiLoader, Marker } from '@react-google-maps/api';
 import { motion, AnimatePresence } from 'motion/react';
-import { MapPin, Bell, Phone, ShieldAlert, BookOpen, Calendar, X, MessageSquare, Plus, Info, FileText, Clock, UserCheck, ShieldCheck, Users, AlertTriangle } from 'lucide-react';
+import { MapPin, Bell, Phone, ShieldAlert, BookOpen, Calendar, X, MessageSquare, Plus, Info, FileText, Clock, UserCheck, ShieldCheck, Users, AlertTriangle, GraduationCap, ClipboardCheck } from 'lucide-react';
 import { handleFirestoreError, OperationType } from '../../lib/firestore-errors';
 
 const mapContainerStyle = { width: '100%', height: '300px' };
@@ -38,6 +38,11 @@ export const ParentDashboard: React.FC<{ onStartCall?: (channel: string, receive
   const [authorizedPersons, setAuthorizedPersons] = useState<any[]>([]);
   const [meetingRequests, setMeetingRequests] = useState<any[]>([]);
   const [activityPermissions, setActivityPermissions] = useState<any[]>([]);
+  const [incidents, setIncidents] = useState<any[]>([]);
+  const [quranProgress, setQuranProgress] = useState<any[]>([]);
+  const [sportsTraining, setSportsTraining] = useState<any[]>([]);
+  const [attendance, setAttendance] = useState<any[]>([]);
+  const [grades, setGrades] = useState<any[]>([]);
   const [isAddingAuthPerson, setIsAddingAuthPerson] = useState(false);
   const [newAuthPerson, setNewAuthPerson] = useState({ name: '', phone: '', relationship: '' });
 
@@ -161,26 +166,34 @@ export const ParentDashboard: React.FC<{ onStartCall?: (channel: string, receive
     return () => unsubscribeGlobal();
   }, [user]);
 
-  // Listen for announcements
+  const [files, setFiles] = useState<any[]>([]);
+
   useEffect(() => {
-    if (children.length === 0) return;
+    if (!profile?.uid || children.length === 0) return;
     const schoolIds = Array.from(new Set(children.map(c => c.schoolId)));
-    const q = query(collection(db, 'announcements'), where('schoolId', 'in', schoolIds));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setAnnouncements(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Announcement)));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'announcements', user || undefined);
+    
+    // Listen for announcements and their files
+    const annQ = query(collection(db, 'announcements'), where('schoolId', 'in', schoolIds));
+    const unsubscribeAnn = onSnapshot(annQ, (snapshot) => {
+      const annList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Announcement));
+      setAnnouncements(annList);
+      
+      const annIds = annList.map(a => a.id);
+      if (annIds.length > 0) {
+        const filesQ = query(collection(db, 'files'), where('announcementId', 'in', annIds));
+        onSnapshot(filesQ, (fSnap) => {
+           setFiles(fSnap.docs.map(fd => ({ id: fd.id, ...fd.data() })));
+        });
+      }
     });
 
     const schQ = query(collection(db, 'schedules'), where('schoolId', 'in', schoolIds));
     const unsubscribeSch = onSnapshot(schQ, (snapshot) => {
       setSchedules(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'schedules', user || undefined);
     });
 
     return () => {
-      unsubscribe();
+      unsubscribeAnn();
       unsubscribeSch();
     };
   }, [children]);
@@ -199,15 +212,47 @@ export const ParentDashboard: React.FC<{ onStartCall?: (channel: string, receive
     });
 
     const childIds = children.map(c => c.childUid);
+    const studentIds = children.map(c => c.id);
     if (childIds.length > 0) {
       const actQ = query(collection(db, 'activity_permissions'), where('childId', 'in', childIds));
       const unsubscribeAct = onSnapshot(actQ, (snapshot) => {
         setActivityPermissions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       });
+
+      const incQ = query(collection(db, 'incidents'), where('studentId', 'in', studentIds));
+      const unsubscribeInc = onSnapshot(incQ, (snapshot) => {
+        setIncidents(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      });
+
+      const quranQ = query(collection(db, 'quran_progress'), where('studentId', 'in', studentIds));
+      const unsubscribeQuran = onSnapshot(quranQ, (snapshot) => {
+        setQuranProgress(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      });
+
+      const sportsQ = query(collection(db, 'sports_training'), where('studentId', 'in', studentIds));
+      const unsubscribeSports = onSnapshot(sportsQ, (snapshot) => {
+        setSportsTraining(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      });
+
+      const attendQ = query(collection(db, 'attendance'), where('studentId', 'in', studentIds));
+      const unsubscribeAttend = onSnapshot(attendQ, (snapshot) => {
+        setAttendance(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      });
+
+      const gradesQ = query(collection(db, 'grades'), where('studentId', 'in', studentIds), orderBy('createdAt', 'desc'));
+      const unsubscribeGrades = onSnapshot(gradesQ, (snapshot) => {
+        setGrades(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      });
+
       return () => {
         unsubscribeAuth();
         unsubscribeMeet();
         unsubscribeAct();
+        unsubscribeInc();
+        unsubscribeQuran();
+        unsubscribeSports();
+        unsubscribeAttend();
+        unsubscribeGrades();
       };
     }
 
@@ -782,6 +827,154 @@ export const ParentDashboard: React.FC<{ onStartCall?: (channel: string, receive
              </div>
           </section>
 
+          {/* Specialized Progress */}
+          {(quranProgress.length > 0 || sportsTraining.length > 0) && (
+            <section className="space-y-4">
+              <div className="flex items-center gap-2 font-bold text-slate-900 dark:text-white">
+                <BookOpen className="w-5 h-5 text-emerald-500" />
+                Specialized Hifz & Training
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {quranProgress.map(log => (
+                  <div key={log.id} className="bg-emerald-50 dark:bg-emerald-950/30 p-4 rounded-2xl border border-emerald-100 dark:border-emerald-900/50">
+                    <div className="flex justify-between items-start mb-1">
+                       <span className="text-[10px] font-black text-emerald-600 uppercase">Quran Progress</span>
+                       <span className="text-[10px] text-emerald-400">{log.createdAt?.toDate().toLocaleDateString()}</span>
+                    </div>
+                    <div className="font-bold text-sm text-slate-900 dark:text-white">Surah {log.surah}</div>
+                    <div className="text-xs text-slate-600 dark:text-slate-400">Verse {log.verse} • {log.status}</div>
+                  </div>
+                ))}
+                {sportsTraining.map(log => (
+                  <div key={log.id} className="bg-blue-50 dark:bg-blue-950/30 p-4 rounded-2xl border border-blue-100 dark:border-blue-900/50">
+                    <div className="flex justify-between items-start mb-1">
+                       <span className="text-[10px] font-black text-blue-600 uppercase">Sports Drill</span>
+                       <span className="text-[10px] text-blue-400">{log.createdAt?.toDate().toLocaleDateString()}</span>
+                    </div>
+                    <div className="font-bold text-sm text-slate-900 dark:text-white">{log.activity}</div>
+                    <p className="text-xs text-slate-600 dark:text-slate-400 italic">"{log.performance}"</p>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* Academic Grades */}
+          {grades.length > 0 && (
+            <section className="space-y-4">
+              <div className="flex items-center gap-2 font-bold text-slate-900 dark:text-white">
+                <GraduationCap className="w-5 h-5 text-emerald-600" />
+                Grades & Academic Reports
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {grades.map(g => {
+                   const student = children.find(c => c.id === g.studentId);
+                   return (
+                    <div key={g.id} className="bg-white dark:bg-slate-900 p-5 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm">
+                      <div className="flex justify-between items-center mb-3">
+                        <span className="text-[10px] font-black text-blue-600 uppercase tracking-widest">{student?.name || 'Student'} Grade</span>
+                        <span className="text-[10px] text-slate-400">{g.createdAt?.toDate().toLocaleDateString()}</span>
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <div className="text-3xl font-black text-slate-900 dark:text-white">{g.grade}</div>
+                        <div className="flex-1">
+                           <div className="text-[10px] font-black uppercase text-slate-400">Behavior</div>
+                           <div className={`text-xs font-bold uppercase transition-colors ${
+                              g.behavior === 'excellent' ? 'text-emerald-500' :
+                              g.behavior === 'good' ? 'text-blue-500' : 'text-amber-500'
+                           }`}>{g.behavior}</div>
+                        </div>
+                      </div>
+                      <p className="mt-3 text-xs text-slate-500 italic">"{g.comment}"</p>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
+          {/* Attendance Monitoring */}
+          {attendance.length > 0 && (
+            <section className="space-y-4">
+              <div className="flex items-center gap-2 font-bold text-slate-900 dark:text-white">
+                <ClipboardCheck className="w-5 h-5 text-purple-600" />
+                Attendance & Absences
+              </div>
+              <div className="bg-white dark:bg-slate-900 rounded-[2rem] border border-slate-100 dark:border-slate-800 shadow-sm overflow-hidden">
+                <div className="p-4 grid grid-cols-1 divide-y divide-slate-50 dark:divide-slate-800">
+                  {attendance.sort((a,b) => b.date?.seconds - a.date?.seconds).slice(0, 10).map(at => {
+                    const student = children.find(c => c.id === at.studentId);
+                    return (
+                      <div key={at.id} className="py-3 flex justify-between items-center">
+                        <div>
+                          <div className="font-bold text-sm text-slate-900 dark:text-white">{student?.name || 'Student'}</div>
+                          <div className="text-[10px] text-slate-400">{at.date?.toDate().toLocaleString()}</div>
+                        </div>
+                        <span className={`px-2 py-1 rounded-lg text-[10px] font-black uppercase ${at.status === 'present' ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'}`}>
+                          {at.status}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </section>
+          )}
+
+          {/* Incident Reports */}
+          {incidents.length > 0 && (
+            <section className="space-y-4">
+              <div className="flex items-center gap-2 font-bold text-slate-900 dark:text-white">
+                <AlertTriangle className="w-5 h-5 text-red-500" />
+                Behavioral & Safety Reports
+              </div>
+              <div className="space-y-3">
+                {incidents.map(inc => (
+                  <div key={inc.id} className="bg-red-50 dark:bg-red-950/20 p-4 rounded-2xl border border-red-100 dark:border-red-900/30">
+                    <div className="flex justify-between items-center mb-2">
+                       <span className={`text-[10px] font-black px-2 py-0.5 rounded-full uppercase ${
+                         inc.type === 'safety' ? 'bg-red-100 text-red-600' : 'bg-amber-100 text-amber-600'
+                       }`}>
+                         {inc.type}
+                       </span>
+                       <div className="text-[10px] text-slate-400 font-bold">{inc.createdAt?.toDate().toLocaleDateString()}</div>
+                    </div>
+                    <p className="text-sm text-slate-700 dark:text-slate-300 font-medium">"{inc.content}"</p>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* Files & Documents */}
+          {files.length > 0 && (
+            <section className="space-y-4">
+              <div className="flex items-center gap-2 font-bold text-slate-900 dark:text-white">
+                <FileText className="w-5 h-5 text-blue-500" />
+                Shared Documents
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {files.map(f => (
+                  <a 
+                    key={f.id}
+                    href={f.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="p-4 bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-sm flex items-center gap-3 hover:border-blue-200 transition-all group"
+                  >
+                    <div className="p-2 bg-blue-50 dark:bg-blue-900/30 rounded-xl group-hover:bg-blue-100 transition-colors">
+                      <FileText className="w-5 h-5 text-blue-600" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-bold text-sm text-slate-900 dark:text-white truncate uppercase tracking-tight">{f.title || 'Untitled Document'}</div>
+                      <div className="text-[10px] text-slate-400 font-medium">Click to view/download</div>
+                    </div>
+                  </a>
+                ))}
+              </div>
+            </section>
+          )}
+
           {/* Meeting Requests */}
           <section className="space-y-4">
              <div className="flex items-center justify-between">
@@ -851,6 +1044,25 @@ export const ParentDashboard: React.FC<{ onStartCall?: (channel: string, receive
                     {selectedAnnouncement.content}
                   </div>
                 </div>
+                {files.filter(f => f.announcementId === selectedAnnouncement.id).length > 0 && (
+                  <div>
+                    <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Attachments</h4>
+                    <div className="space-y-2">
+                       {files.filter(f => f.announcementId === selectedAnnouncement.id).map(f => (
+                         <a 
+                          key={f.id}
+                          href={f.url} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-3 p-3 bg-blue-50 dark:bg-blue-900/30 rounded-2xl text-blue-600 text-xs font-bold"
+                         >
+                           <FileText className="w-4 h-4" />
+                           {f.title}
+                         </a>
+                       ))}
+                    </div>
+                  </div>
+                )}
                 <div className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest">
                   <Calendar className="w-3 h-3" />
                   Posted on {selectedAnnouncement.createdAt?.toDate().toLocaleString()}

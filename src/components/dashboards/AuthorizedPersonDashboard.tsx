@@ -13,17 +13,24 @@ import { Chat } from '../Chat';
 import { ContactList } from '../ContactList';
 import { PrivateMessaging } from '../PrivateMessaging';
 
+import { GoogleMap, useJsApiLoader, Marker } from '@react-google-maps/api';
+
 export const AuthorizedPersonDashboard: React.FC = () => {
   const { user, profile } = useAuth();
   const [authorizedChildren, setAuthorizedChildren] = useState<Student[]>([]);
   const [schoolInfo, setSchoolInfo] = useState<any>(null);
-  const [activeTab, setActiveTab] = useState<'info' | 'messenger'>('info');
+  const [activeTab, setActiveTab] = useState<'info' | 'tracking' | 'messenger'>('info');
   const [selectedContact, setSelectedContact] = useState<{ uid: string, displayName: string } | null>(null);
   const [unreadTotal, setUnreadTotal] = useState(0);
   const [messageToAdmin, setMessageToAdmin] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+
+  const { isLoaded } = useJsApiLoader({
+    id: 'google-map-script',
+    googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || ""
+  });
 
   useEffect(() => {
     if (!profile?.uid) return;
@@ -152,6 +159,15 @@ export const AuthorizedPersonDashboard: React.FC = () => {
           {activeTab === 'info' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
         </button>
         <button 
+          onClick={() => setActiveTab('tracking')}
+          className={`pb-4 px-2 text-sm font-bold transition-all relative shrink-0 ${
+            activeTab === 'tracking' ? 'text-blue-600' : 'text-slate-400'
+          }`}
+        >
+          Track Location
+          {activeTab === 'tracking' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
+        </button>
+        <button 
           onClick={() => setActiveTab('messenger')}
           className={`pb-4 px-2 text-sm font-bold transition-all relative flex items-center gap-2 shrink-0 ${
             activeTab === 'messenger' ? 'text-blue-600' : 'text-slate-400'
@@ -169,6 +185,75 @@ export const AuthorizedPersonDashboard: React.FC = () => {
 
       {activeTab === 'messenger' ? (
         <PrivateMessaging />
+      ) : activeTab === 'tracking' ? (
+        <div className="space-y-6">
+           <div className="flex items-center justify-between">
+              <div>
+                 <h3 className="text-xl font-bold text-slate-900 dark:text-white">Live Child Location</h3>
+                 <p className="text-sm text-slate-500">Real-time GPS tracking for authorized pickups</p>
+              </div>
+           </div>
+
+           <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
+              <div className="lg:col-span-3 space-y-4">
+                 {authorizedChildren.map(child => (
+                   <div key={child.id} className="bg-white dark:bg-slate-900 p-2 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 shadow-sm overflow-hidden h-[400px]">
+                      {isLoaded ? (
+                        <GoogleMap
+                          mapContainerStyle={{ width: '100%', height: '100%', borderRadius: '2rem' }}
+                          center={child.location || { lat: 36.45, lng: 6.17 }}
+                          zoom={15}
+                          options={{
+                            styles: [
+                              { featureType: "all", elementType: "labels.text.fill", stylers: [{ color: "#6b7280" }] },
+                              { featureType: "water", elementType: "geometry", stylers: [{ color: "#e5e7eb" }] }
+                            ],
+                            disableDefaultUI: true,
+                            zoomControl: true
+                          }}
+                        >
+                          {child.location && (
+                            <Marker 
+                              position={child.location} 
+                              label={{ text: child.name, className: 'bg-white px-2 py-1 rounded shadow-sm text-[10px] font-bold' }}
+                            />
+                          )}
+                        </GoogleMap>
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center font-bold text-slate-400">Loading Map...</div>
+                      )}
+                   </div>
+                 ))}
+                 {authorizedChildren.length === 0 && (
+                   <div className="text-center py-20 bg-slate-50 dark:bg-slate-800 rounded-3xl text-slate-400 italic">
+                     No students authorized for pickup.
+                   </div>
+                 )}
+              </div>
+              <div className="space-y-4">
+                 <h4 className="font-bold text-slate-900 dark:text-white uppercase tracking-wider text-xs">Quick Access</h4>
+                 {authorizedChildren.map(child => (
+                   <div key={child.id} className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-sm">
+                      <div className="flex items-center gap-3">
+                         <div className="w-10 h-10 bg-slate-50 dark:bg-slate-800 rounded-xl flex items-center justify-center font-bold text-slate-400">
+                            {child.name[0]}
+                         </div>
+                         <div>
+                            <div className="font-bold text-sm text-slate-900 dark:text-white">{child.name}</div>
+                            <div className="text-[10px] text-slate-500 uppercase font-black">Grade {child.grade}</div>
+                         </div>
+                      </div>
+                      {child.location && (
+                        <div className="mt-3 flex items-center gap-2 text-emerald-600">
+                           <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
+                           <span className="text-[10px] font-bold uppercase">Signal Active</span>
+                        </div>
+                      )}
+                   </div>
+                 ))}
+              </div>
+           </div>
+        </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2 space-y-6">
